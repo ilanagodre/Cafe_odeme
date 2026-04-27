@@ -1,7 +1,7 @@
 # Security Guidelines & Checklist
 
-**Version:** 1.0  
-**Last Updated:** 2026-04-19  
+**Version:** 1.1  
+**Last Updated:** 2026-04-27  
 **Status:** Production-Ready Security Model
 
 ---
@@ -11,8 +11,10 @@
 This document outlines the security architecture, implemented protections, and required hardening steps for the Cafe Payment system. The application is MVP-ready for controlled testing but requires additional hardening before public production deployment.
 
 ### Security Status
+
 - ✅ **Core protections implemented:** Authentication, authorization, encryption
-- ⚠️ **Hardening needed:** HTTPS, security headers, audit logging, monitoring
+- ✅ **Hardening complete:** Security headers (helmet), rate limiting, audit logging, Sentry error tracking
+- ⚠️ **Production config needed:** HTTPS/TLS, strong secrets, CORS domain
 - 🔴 **Critical:** Change default secrets before any production use
 
 ---
@@ -22,15 +24,15 @@ This document outlines the security architecture, implemented protections, and r
 ### JWT Token Security
 
 **Implementation:**
+
 ```javascript
-const token = jwt.sign(
-  { id, name, role },
-  process.env.JWT_SECRET,
-  { expiresIn: '12h' }
-);
+const token = jwt.sign({ id, name, role }, process.env.JWT_SECRET, {
+  expiresIn: "12h",
+});
 ```
 
 **Security Measures:**
+
 - ✅ Tokens expire after 12 hours
 - ✅ Random 32-byte secret required (use `openssl rand -hex 32`)
 - ✅ Only valid tokens accepted (verified signature)
@@ -39,7 +41,7 @@ const token = jwt.sign(
 **Risks & Mitigations:**
 | Risk | Current Status | Mitigation |
 |------|---|---|
-| Weak secret | 🔴 Default: 'dev-secret-change-in-prod' | **MUST set JWT_SECRET env var** |
+| Weak secret | ✅ Mandatory env var, server fatal if missing | Set strong value: `openssl rand -hex 32` |
 | Token hijacking | ✅ HTTPS required | Enable HTTPS/TLS in production |
 | Long expiration | ✅ 12h is reasonable | Review if needed |
 | Token replay | ⚠️ No replay protection | Add nonce/jti if handling sensitive ops |
@@ -47,17 +49,16 @@ const token = jwt.sign(
 ### Role-Based Access Control (RBAC)
 
 **Roles:**
+
 - `owner` - Full system access
 - `head_waiter` - Dashboard, order management
 - `waiter` - Order taking, table operations
 - (No role) - Limited to public endpoints
 
 **Implementation:**
+
 ```javascript
-router.get('/dashboard', 
-  requireRole('owner', 'head_waiter'), 
-  handler
-);
+router.get("/dashboard", requireRole("owner", "head_waiter"), handler);
 ```
 
 **Protected Endpoints:**
@@ -76,6 +77,7 @@ router.get('/dashboard',
 ### Database Protection
 
 **Connection Security:**
+
 ```javascript
 const pool = new Pool({
   host: process.env.POSTGRES_HOST,
@@ -83,21 +85,24 @@ const pool = new Pool({
   database: process.env.POSTGRES_DB,
   user: process.env.POSTGRES_USER,
   password: process.env.POSTGRES_PASSWORD,
-  max: 10 // Connection pooling
+  max: 10, // Connection pooling
 });
 ```
 
 **SQL Injection Prevention:**
+
 - ✅ **Parameterized queries used throughout**
+
   ```javascript
   // GOOD - Safe from SQL injection
-  pool.query('SELECT * FROM users WHERE id = $1', [userId])
+  pool.query("SELECT * FROM users WHERE id = $1", [userId]);
 
   // BAD - Vulnerable (NOT USED in codebase)
-  pool.query(`SELECT * FROM users WHERE id = ${userId}`)
+  pool.query(`SELECT * FROM users WHERE id = ${userId}`);
   ```
 
 **Password Hashing:**
+
 - ✅ **bcrypt with 10 salt rounds**
   ```javascript
   const hash = await bcrypt.hash(pin, 10);
@@ -105,6 +110,7 @@ const pool = new Pool({
   ```
 
 **Database Access Control:**
+
 - ⚠️ Database user has full privileges
 - 🟡 Recommendation: Create limited user roles per application needs
 
@@ -120,12 +126,14 @@ const pool = new Pool({
 | User IDs | database | ✅ UUID v4 |
 
 **PII Handling:**
+
 - Names: Stored plaintext (consider encryption if compliant with GDPR)
 - Email: Stored plaintext (should be encrypted)
 - Phone: Optional, stored plaintext
 - Transactions: Logged for audit trail (good for compliance)
 
 **Recommendations:**
+
 ```javascript
 // Before production:
 // 1. Enable PostgreSQL encryption at rest
@@ -141,20 +149,25 @@ const pool = new Pool({
 ### Input Validation
 
 **Current Implementation:**
+
 - ✅ Joi schema validation on all POST/PATCH endpoints
 - ✅ Validation middleware enforces schema before handler
 
 **Example Validation:**
+
 ```javascript
 const schemas = {
   staffAdd: joi.object({
     name: joi.string().min(1).max(100).required(),
-    role: joi.string().valid('waiter', 'head_waiter').required(),
-    pin: joi.string().pattern(/^\d{4,6}$/).required() // 4-6 digits
-  })
+    role: joi.string().valid("waiter", "head_waiter").required(),
+    pin: joi
+      .string()
+      .pattern(/^\d{4,6}$/)
+      .required(), // 4-6 digits
+  }),
 };
 
-router.post('/staff', validate('staffAdd'), handler);
+router.post("/staff", validate("staffAdd"), handler);
 ```
 
 **Validated Endpoints:**
@@ -167,6 +180,7 @@ router.post('/staff', validate('staffAdd'), handler);
 | POST /api/auth/login | pin (digits only) | ✅ |
 
 **Gaps:**
+
 - ⚠️ Frontend validation needed (client-side)
 - ⚠️ Email format validation
 - ⚠️ Phone number format validation
@@ -174,34 +188,40 @@ router.post('/staff', validate('staffAdd'), handler);
 ### Rate Limiting
 
 **Implemented:**
+
 - ✅ Login endpoint: 5 attempts per 15 minutes per IP
   ```javascript
   const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 5,
-    message: 'Too many login attempts'
+    message: "Too many login attempts",
   });
   ```
 
 **Recommendation: Extend to other endpoints**
+
 ```javascript
 // Add to other sensitive endpoints:
-router.post('/api/order', orderLimiter, handler); // 100/hour
-router.post('/api/payment', paymentLimiter, handler); // 50/hour
+router.post("/api/order", orderLimiter, handler); // 100/hour
+router.post("/api/payment", paymentLimiter, handler); // 50/hour
 ```
 
 ### CORS Configuration
 
 **Current:**
+
 ```javascript
-app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-  credentials: true
-}));
+app.use(
+  cors({
+    origin: process.env.FRONTEND_URL || "http://localhost:5173",
+    credentials: true,
+  }),
+);
 ```
 
 **Status:** ✅ Properly configured for development
 **For Production:**
+
 ```env
 FRONTEND_URL=https://yourdomain.com
 ```
@@ -215,7 +235,9 @@ FRONTEND_URL=https://yourdomain.com
 **Current Status:** 🔴 HTTP only (development)
 
 **Required for Production:**
+
 1. Obtain SSL certificate
+
    ```bash
    # Option 1: Let's Encrypt (free)
    certbot certonly --standalone -d yourdomain.com
@@ -224,13 +246,14 @@ FRONTEND_URL=https://yourdomain.com
    ```
 
 2. Configure HTTPS
+
    ```javascript
-   const https = require('https');
-   const fs = require('fs');
+   const https = require("https");
+   const fs = require("fs");
 
    const options = {
-     key: fs.readFileSync('/path/to/key.pem'),
-     cert: fs.readFileSync('/path/to/cert.pem')
+     key: fs.readFileSync("/path/to/key.pem"),
+     cert: fs.readFileSync("/path/to/cert.pem"),
    };
 
    https.createServer(options, app).listen(443);
@@ -239,7 +262,7 @@ FRONTEND_URL=https://yourdomain.com
 3. Redirect HTTP to HTTPS
    ```javascript
    app.use((req, res, next) => {
-     if (!req.secure && process.env.NODE_ENV === 'production') {
+     if (!req.secure && process.env.NODE_ENV === "production") {
        return res.redirect(`https://${req.headers.host}${req.url}`);
      }
      next();
@@ -251,14 +274,16 @@ FRONTEND_URL=https://yourdomain.com
 **Current:** ✅ WebSocket over HTTP (development)
 
 **For Production:**
+
 - 🔴 Must use WSS (WebSocket Secure over TLS)
 - 🔴 Must validate origin headers
 - 🔴 Must validate session tokens
 
 **Implementation:**
+
 ```javascript
 // Validate WebSocket connections
-io.on('connection', (socket) => {
+io.on("connection", (socket) => {
   const token = socket.handshake.auth.token;
   if (!validateToken(token)) {
     socket.disconnect(true);
@@ -270,33 +295,23 @@ io.on('connection', (socket) => {
 
 ## Security Headers
 
-### Missing Security Headers
+### Security Headers Status
 
-**Add via nginx or express middleware:**
+`helmet()` middleware `server.js`'de aktif — tüm standart güvenlik başlıkları otomatik ekleniyor.
 
 ```javascript
-const helmet = require('helmet');
-app.use(helmet());
-
-// Additional headers
-app.use((req, res, next) => {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('Content-Security-Policy', "default-src 'self'");
-  res.setHeader('Strict-Transport-Security', 'max-age=31536000');
-  next();
-});
+app.use(helmet()); // server.js:27 — aktif ✅
 ```
 
-### Headers to Implement
+### Headers Status
 
-| Header | Purpose | Current | Action |
-|--------|---------|---------|--------|
-| Content-Security-Policy | XSS protection | ❌ Missing | Add |
-| X-Frame-Options | Clickjacking | ❌ Missing | Add |
-| X-Content-Type-Options | MIME sniffing | ❌ Missing | Add |
-| Strict-Transport-Security | Force HTTPS | ❌ Missing | Add |
-| Referrer-Policy | Info disclosure | ⚠️ Default | Configure |
+| Header                    | Purpose         | Current   | Action           |
+| ------------------------- | --------------- | --------- | ---------------- |
+| Content-Security-Policy   | XSS protection  | ✅ helmet | -                |
+| X-Frame-Options           | Clickjacking    | ✅ helmet | -                |
+| X-Content-Type-Options    | MIME sniffing   | ✅ helmet | -                |
+| Strict-Transport-Security | Force HTTPS     | ✅ helmet | HTTPS gerektirir |
+| Referrer-Policy           | Info disclosure | ✅ helmet | -                |
 
 ---
 
@@ -305,11 +320,13 @@ app.use((req, res, next) => {
 ### Current Audit Trail
 
 **Implemented:**
+
 - ✅ Staff login events logged
 - ✅ Order creation logged
 - ✅ Payment events logged
-- ⚠️ No request logging (only errors)
-- ⚠️ No access logging
+- ✅ Request logging aktif — tüm API istekleri Winston ile loglanıyor (`middleware/logging.js`)
+- ✅ Access logging aktif — IP, method, path, duration, statusCode
+- ✅ Sentry error tracking entegre — `SENTRY_DSN` env var ile aktif olur
 
 ### Audit Log Schema
 
@@ -331,19 +348,19 @@ app.use((req, res, next) => {
   logger.info(`${req.method} ${req.path}`, {
     ip: req.ip,
     user: req.user?.id,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
   });
   next();
 });
 
 // 2. Log errors with context
 app.use((err, req, res, next) => {
-  logger.error('Unhandled error', {
+  logger.error("Unhandled error", {
     message: err.message,
     stack: err.stack,
-    request: { method: req.method, path: req.path }
+    request: { method: req.method, path: req.path },
   });
-  res.status(500).json({ error: 'Internal server error' });
+  res.status(500).json({ error: "Internal server error" });
 });
 
 // 3. Send logs to external service
@@ -360,11 +377,13 @@ app.use((err, req, res, next) => {
 ### Current Error Messages
 
 **Good:**
+
 - ✅ Generic messages for authentication failures
 - ✅ Role-based access denied messages
 - ✅ Validation error details shown (helps debugging)
 
 **Risks:**
+
 - ⚠️ Detailed error messages in production
 - ⚠️ Stack traces exposed to clients
 - ⚠️ SQL errors shown (info disclosure)
@@ -372,17 +391,17 @@ app.use((err, req, res, next) => {
 ### Production Error Handling
 
 ```javascript
-if (process.env.NODE_ENV === 'production') {
+if (process.env.NODE_ENV === "production") {
   // Hide technical details
-  if (err.code === 'ECONNREFUSED') {
-    return res.status(500).json({ error: 'Service unavailable' });
+  if (err.code === "ECONNREFUSED") {
+    return res.status(500).json({ error: "Service unavailable" });
   }
 
   // Log full details server-side
   logger.error(err, { request: req });
 
   // Return generic error to client
-  res.status(500).json({ error: 'An error occurred' });
+  res.status(500).json({ error: "An error occurred" });
 }
 ```
 
@@ -392,22 +411,23 @@ if (process.env.NODE_ENV === 'production') {
 
 ### OWASP Top 10 Checklist
 
-| Risk | Status | Details |
-|------|--------|---------|
-| A01: Broken Access Control | ⚠️ | Roles implemented, but missing field-level controls |
-| A02: Cryptographic Failures | ⚠️ | Hashing OK, but no encryption at rest |
-| A03: Injection | ✅ | Parameterized queries used |
-| A04: Insecure Design | ⚠️ | Auth secure, but missing threat modeling |
-| A05: Security Misconfiguration | ⚠️ | Secrets need to be externalized |
-| A06: Vulnerable Components | ✅ | Dependencies managed via npm |
-| A07: Authentication | ⚠️ | JWT OK, but needs HTTPS |
-| A08: Data Integrity | ⚠️ | No request signing/verification |
-| A09: Logging & Monitoring | ⚠️ | Logs implemented, but not aggregated |
-| A10: SSRF | ✅ | No external requests made |
+| Risk                           | Status | Details                                             |
+| ------------------------------ | ------ | --------------------------------------------------- |
+| A01: Broken Access Control     | ⚠️     | Roles implemented, but missing field-level controls |
+| A02: Cryptographic Failures    | ⚠️     | Hashing OK, but no encryption at rest               |
+| A03: Injection                 | ✅     | Parameterized queries used                          |
+| A04: Insecure Design           | ⚠️     | Auth secure, but missing threat modeling            |
+| A05: Security Misconfiguration | ⚠️     | Secrets need to be externalized                     |
+| A06: Vulnerable Components     | ✅     | Dependencies managed via npm                        |
+| A07: Authentication            | ⚠️     | JWT OK, but needs HTTPS                             |
+| A08: Data Integrity            | ⚠️     | No request signing/verification                     |
+| A09: Logging & Monitoring      | ⚠️     | Logs implemented, but not aggregated                |
+| A10: SSRF                      | ✅     | No external requests made                           |
 
 ### GDPR Compliance (If applicable)
 
 **Required Actions:**
+
 - [ ] Privacy policy published
 - [ ] Consent management for data collection
 - [ ] Data retention policies defined
@@ -423,6 +443,7 @@ if (process.env.NODE_ENV === 'production') {
 ### Security Incident Checklist
 
 **If compromise detected:**
+
 1. ☐ Isolate affected systems
 2. ☐ Enable detailed logging
 3. ☐ Review audit logs
@@ -434,6 +455,7 @@ if (process.env.NODE_ENV === 'production') {
 9. ☐ Post-mortem analysis
 
 ### Key Contacts
+
 - Security Team: security@yourdomain.com
 - Legal: legal@yourdomain.com
 - Operations: ops@yourdomain.com
@@ -470,13 +492,13 @@ artillery run load-test.yml
 
 ### Recommended Tools
 
-| Tool | Purpose | Type |
-|------|---------|------|
-| OWASP ZAP | Web app scanning | Dynamic |
-| Burp Suite | Penetration testing | Dynamic |
-| Snyk | Dependency scanning | Static |
-| SonarQube | Code quality + security | Static |
-| Sentry | Error tracking | Runtime |
+| Tool       | Purpose                 | Type    |
+| ---------- | ----------------------- | ------- |
+| OWASP ZAP  | Web app scanning        | Dynamic |
+| Burp Suite | Penetration testing     | Dynamic |
+| Snyk       | Dependency scanning     | Static  |
+| SonarQube  | Code quality + security | Static  |
+| Sentry     | Error tracking          | Runtime |
 
 ---
 
@@ -520,15 +542,16 @@ echo "npm audit" > .githooks/pre-push
 
 ### Pre-Deployment Security Review
 
-- [ ] JWT_SECRET set to strong value (32+ bytes)
+- [ ] JWT_SECRET set to strong value (32+ bytes) — `openssl rand -hex 32`
 - [ ] POSTGRES_PASSWORD set to strong value (16+ bytes)
 - [ ] HTTPS/TLS certificate valid and installed
 - [ ] All secrets in environment variables (not git)
-- [ ] Security headers configured
+- [x] Security headers configured — helmet.js aktif ✅
 - [ ] CORS origin set to production domain only
-- [ ] Rate limiting configured on all sensitive endpoints
-- [ ] Error handling doesn't expose technical details
-- [ ] Logging and monitoring enabled
+- [x] Rate limiting configured — login 5/15dk, API 100/dk ✅
+- [x] Error handling doesn't expose technical details — production'da generic mesaj ✅
+- [x] Request logging enabled — Winston aktif ✅
+- [x] Error tracking enabled — Sentry entegre (SENTRY_DSN ile aktif olur) ✅
 - [ ] Database backups automated and tested
 - [ ] Incident response plan documented
 - [ ] Team trained on security practices
@@ -560,12 +583,13 @@ echo "npm audit" > .githooks/pre-push
 
 ## Document History
 
-| Date | Version | Changes |
-|------|---------|---------|
-| 2026-04-19 | 1.0 | Initial security guidelines for MVP |
+| Date       | Version | Changes                                                                                          |
+| ---------- | ------- | ------------------------------------------------------------------------------------------------ |
+| 2026-04-27 | 1.1     | Full audit: helmet aktif, JWT_SECRET zorunlu, Sentry entegre, docker-compose credentials düzeldi |
+| 2026-04-19 | 1.0     | Initial security guidelines for MVP                                                              |
 
 ---
 
-**Last Reviewed:** 2026-04-19  
+**Last Reviewed:** 2026-04-27  
 **Next Review:** 2026-07-19  
 **Owner:** Security Team

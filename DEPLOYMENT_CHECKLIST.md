@@ -40,6 +40,8 @@ Before deploying to production, verify all security, backup, and operational req
 
 - [x] Winston logging is configured ✅
 - [x] Log rotation is enabled (5MB max file size, 5 files retention) ✅
+- [x] Request logging aktif — IP, method, path, duration, statusCode ✅
+- [x] Sentry error tracking entegre — SENTRY_DSN env var ile aktif olur ✅
 - [ ] Logs are written to persistent storage (not ephemeral)
 - [x] Audit logging is enabled for critical operations: ✅
   - [x] User login (tracked) ✅

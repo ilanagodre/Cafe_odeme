@@ -565,6 +565,7 @@ This MVP demonstrates:
 
 | Version | Date       | Changes                                                                                  |
 | ------- | ---------- | ---------------------------------------------------------------------------------------- |
+| 1.2     | 2026-04-27 | Full security audit: Sentry entegre, docker-compose credentials, XSS fix, node_modules   |
 | 1.1     | 2026-04-23 | Security hardening tamamlandı: DATABASE_URL env var, startup checks, debug log temizliği |
 | 1.0     | 2026-04-19 | MVP complete: Waiter order module E2E tested, comprehensive documentation                |
 | 0.9     | 2026-04-18 | Backend & frontend implementation, security fixes                                        |
