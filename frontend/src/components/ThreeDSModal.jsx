@@ -1,20 +1,27 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect } from "react";
 
-export default function ThreeDSModal({ htmlContent, onSuccess, onError, onClose }) {
+export default function ThreeDSModal({
+  htmlContent,
+  onSuccess,
+  onError,
+  onClose,
+}) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const handleMessage = (event) => {
-      // Listen for messages from iframe
-      if (event.data.type === 'payment_success') {
+      const backendOrigin =
+        import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
+      if (event.origin !== backendOrigin) return;
+      if (event.data.type === "payment_success") {
         onSuccess();
-      } else if (event.data.type === 'payment_error') {
-        onError(event.data.message || 'Ödeme başarısız');
+      } else if (event.data.type === "payment_error") {
+        onError(event.data.message || "Ödeme başarısız");
       }
     };
 
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
   }, [onSuccess, onError]);
 
   useEffect(() => {
@@ -27,7 +34,9 @@ export default function ThreeDSModal({ htmlContent, onSuccess, onError, onClose 
       <div className="bg-white rounded-lg w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b">
-          <h3 className="text-lg font-bold text-gray-800">3D Güvenli Doğrulama</h3>
+          <h3 className="text-lg font-bold text-gray-800">
+            3D Güvenli Doğrulama
+          </h3>
           <button
             onClick={onClose}
             disabled={loading}

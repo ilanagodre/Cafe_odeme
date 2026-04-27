@@ -1,4 +1,5 @@
-const logger = require('../config/logger');
+const logger = require("../config/logger");
+const Sentry = require("@sentry/node");
 
 // ─── Request Logging Middleware ────────────────────────
 
@@ -11,7 +12,7 @@ function requestLogger(req, res, next) {
 
   // Capture original send function
   const originalSend = res.send;
-  res.send = function(data) {
+  res.send = function (data) {
     const duration = Date.now() - start;
     const statusCode = res.statusCode;
 
@@ -21,7 +22,7 @@ function requestLogger(req, res, next) {
       statusCode,
       duration: `${duration}ms`,
       ip: req.ip || req.connection.remoteAddress,
-      userAgent: req.headers['user-agent']
+      userAgent: req.headers["user-agent"],
     });
 
     // Log warnings for high latency
@@ -30,7 +31,7 @@ function requestLogger(req, res, next) {
         method: req.method,
         path: req.path,
         duration: `${duration}ms`,
-        statusCode
+        statusCode,
       });
     }
 
@@ -44,7 +45,7 @@ function requestLogger(req, res, next) {
 // ─── Error Handling Middleware ────────────────────────
 
 function errorHandler(err, req, res, next) {
-  const requestId = req.id || 'unknown';
+  const requestId = req.id || "unknown";
 
   // Log error with full context
   logger.error(`Unhandled error: ${err.message}`, {
@@ -53,18 +54,30 @@ function errorHandler(err, req, res, next) {
     path: req.path,
     statusCode: err.statusCode || 500,
     stack: err.stack,
-    userId: req.user?.id
+    userId: req.user?.id,
   });
+
+  if (process.env.SENTRY_DSN) {
+    Sentry.captureException(err, {
+      extra: {
+        requestId,
+        method: req.method,
+        path: req.path,
+        userId: req.user?.id,
+      },
+    });
+  }
 
   // Determine status code
   const statusCode = err.statusCode || 500;
 
   // Send error response without leaking sensitive details
   const errorResponse = {
-    error: process.env.NODE_ENV === 'production'
-      ? 'Internal server error'
-      : err.message,
-    requestId // For debugging
+    error:
+      process.env.NODE_ENV === "production"
+        ? "Internal server error"
+        : err.message,
+    requestId, // For debugging
   };
 
   res.status(statusCode).json(errorResponse);
@@ -79,7 +92,7 @@ function logAuditEvent(userId, action, entityType, entityId, details = {}) {
     entityType,
     entityId,
     ...details,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
   });
 }
 
