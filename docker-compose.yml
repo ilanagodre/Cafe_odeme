@@ -44,15 +44,15 @@ services:
       dockerfile: Dockerfile.api
     container_name: cafe_api
     environment:
-      NODE_ENV: development
+      NODE_ENV: ${NODE_ENV:-production}
       PORT: 3000
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379
       FRONTEND_URL: http://localhost:5173
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN}
-      IYZICO_API_KEY: ${IYZICO_API_KEY:-sandbox-nQ1RjhFZDv0wnLPW2SWYmVeYvYm2eSlx}
-      IYZICO_SECRET_KEY: ${IYZICO_SECRET_KEY:-sandbox-xK5oN2vJpL8mQ3rS7tUvWxYzAbCdEfGh}
+      IYZICO_API_KEY: ${IYZICO_API_KEY}
+      IYZICO_SECRET_KEY: ${IYZICO_SECRET_KEY}
       IYZICO_BASE_URL: https://sandbox-api.iyzipay.com
       IYZICO_CALLBACK_URL: http://localhost:3000/api/payment/iyzico/callback
     ports:
