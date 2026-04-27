@@ -1,0 +1,98 @@
+services:
+  # ─── PostgreSQL ────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: cafe_db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ./database/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql
+      - ./database/migration_phase1.sql:/docker-entrypoint-initdb.d/03-migration-phase1.sql
+      - ./database/migration_phase2.sql:/docker-entrypoint-initdb.d/04-migration-phase2.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cafe_user -d cafe_payment"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    networks:
+      - cafe_network
+
+  # ─── Redis ─────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: cafe_redis
+    command: redis-server --maxmemory 512mb --maxmemory-policy noeviction --appendonly yes --appendfsync everysec
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - cafe_network
+
+  # ─── Backend API + WebSocket ───────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: cafe_api
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379
+      FRONTEND_URL: http://localhost:5173
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN}
+      IYZICO_API_KEY: ${IYZICO_API_KEY:-sandbox-nQ1RjhFZDv0wnLPW2SWYmVeYvYm2eSlx}
+      IYZICO_SECRET_KEY: ${IYZICO_SECRET_KEY:-sandbox-xK5oN2vJpL8mQ3rS7tUvWxYzAbCdEfGh}
+      IYZICO_BASE_URL: https://sandbox-api.iyzipay.com
+      IYZICO_CALLBACK_URL: http://localhost:3000/api/payment/iyzico/callback
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./src:/app/src
+      - ./package.json:/app/package.json
+      - /app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - cafe_network
+
+  # ─── Frontend ──────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: cafe_frontend
+    environment:
+      VITE_API_URL: http://localhost:3000
+      VITE_WS_URL: http://localhost:3000
+      API_URL: http://cafe_api:3000
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - api
+    networks:
+      - cafe_network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  cafe_network:
+    driver: bridge

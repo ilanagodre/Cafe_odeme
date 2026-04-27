@@ -1,0 +1,17 @@
+{
+  "timestamp": "2026-04-19T14:36:40Z",
+  "status": "checking",
+  "checks": {
+    "postgresql": { "status": "ok", "message": "Database running with      8 tables" },
+    "redis": { "status": "ok", "message": "Redis running with  keys" },
+    "api_server": { "status": "ok", "message": "API responding to health check" },
+    "backups": { "status": "ok", "message": "Latest backup: cafe_db_backup_20260419_173630.sql (8,0K) - 0 hours ago" },
+    "disk_space": { "status": "ok", "message": "Using 29% of disk (647Gi available)" },
+    "docker_containers": { "status": "error", "message": "Only        4/4 containers running" },
+    "log_files": { "status": "error", "message": "No logs found or logs directory missing" },
+    "database_size": { "status": "ok", "message": "Database size:  8159 kB" },
+    "database_size": { "status": "ok", "message": "Database size:  8159 kB" }
+  },
+  "status": "unhealthy",
+  "errors": 2
+}

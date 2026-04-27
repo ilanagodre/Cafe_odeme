@@ -1,0 +1,79 @@
+{
+  "projectName": "Cafe Payment System",
+  "description": "Real-time restaurant payment splitting system with customer QR scanning and admin dashboard",
+
+  "languagesAndTools": ["typescript", "javascript", "react", "node.js", "express", "postgresql"],
+
+  "allowedAgents": [
+    "typescript-reviewer",
+    "code-reviewer",
+    "security-reviewer",
+    "tdd-guide",
+    "e2e-runner",
+    "architect",
+    "planner",
+    "build-error-resolver",
+    "refactor-cleaner",
+    "doc-updater"
+  ],
+
+  "autoReview": {
+    "enabled": true,
+    "triggers": ["after-code-write"],
+    "agents": ["typescript-reviewer", "security-reviewer"]
+  },
+
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // empty' | xargs -I{} npx prettier --write {} 2>/dev/null || true"
+          }
+        ]
+      }
+    ]
+  },
+
+  "testing": {
+    "framework": "jest",
+    "e2e": "playwright",
+    "coverageTarget": 80,
+    "testPaths": {
+      "unit": "tests/unit/",
+      "integration": "tests/integration/",
+      "e2e": "frontend/e2e/"
+    }
+  },
+
+  "rules": {
+    "enabled": true,
+    "paths": [
+      "./.claude/rules/common",
+      "./.claude/rules/typescript"
+    ]
+  },
+
+  "codeStyle": {
+    "formatter": "prettier",
+    "linter": "eslint",
+    "typeChecker": "tsc",
+    "immutability": "strict",
+    "maxFileSize": 800,
+    "maxFunctionSize": 50
+  },
+
+  "security": {
+    "validateEnvVars": true,
+    "noHardcodedSecrets": true,
+    "auditOnCommit": true
+  },
+
+  "git": {
+    "commitTemplate": "conventional",
+    "verifyTests": true,
+    "runLinters": true
+  }
+}
