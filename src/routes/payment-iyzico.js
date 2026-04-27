@@ -16,7 +16,7 @@ function escapeHtml(str) {
     .replace(/'/g, "&#39;");
 }
 
-// ─── VALIDATION MIDDLEWARE ──────────────────────────────────────────
+// ─── VALIDATION ────────────────────────────────────────────────────
 
 function validateSchema(schema) {
   return (req, res, next) => {
@@ -24,18 +24,14 @@ function validateSchema(schema) {
       abortEarly: false,
       stripUnknown: true,
     });
-
     if (error) {
       const messages = error.details.map((d) => d.message).join(", ");
       return res.status(400).json({ error: `Validation failed: ${messages}` });
     }
-
     req.body = value;
     next();
   };
 }
-
-// ─── VALIDATION SCHEMAS ────────────────────────────────────────────
 
 const iyzicoInitiateSchema = Joi.object({
   sessionToken: Joi.string().length(32).required(),
@@ -61,7 +57,7 @@ const iyzicoInitiateSchema = Joi.object({
   }).required(),
 });
 
-// ─── HELPER FUNCTIONS ──────────────────────────────────────────────
+// ─── HELPERS ───────────────────────────────────────────────────────
 
 async function getSessionData(sessionToken) {
   const result = await pool.query(
@@ -79,22 +75,26 @@ async function createPendingPayment(
   participantId,
   amount,
   paymentMode,
+  targetId,
+  orderIds,
 ) {
   const paymentId = uuidv4();
   const conversationId = uuidv4();
 
   await pool.query(
-    `INSERT INTO payments (id, session_id, participant_id, amount, payment_type, status, provider, provider_reference)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    `INSERT INTO payments
+       (id, session_id, participant_id, amount, payment_type, status,
+        provider, provider_reference, payment_mode, target_id, order_ids)
+     VALUES ($1, $2, $3, $4, 'iyzico_3ds', 'pending', 'iyzico', $5, $6, $7, $8)`,
     [
       paymentId,
       sessionId,
       participantId,
       amount,
-      "iyzico_3ds",
-      "pending",
-      "iyzico",
       conversationId,
+      paymentMode,
+      targetId || null,
+      orderIds ? JSON.stringify(orderIds) : null,
     ],
   );
 
@@ -117,46 +117,133 @@ async function getBasketItems(sessionId) {
   }));
 }
 
-// ─── ROUTES ────────────────────────────────────────────────────────────
+// After iyzico confirms payment: update DB and return session balance
+async function finalizePayment(conversationId, iyzicoPaymentId, iyzicoResult) {
+  // Mark payment as completed
+  await pool.query(
+    `UPDATE payments
+     SET status = 'completed', completed_at = NOW(),
+         provider_reference = $1, provider_payload = $2
+     WHERE provider_reference = $3`,
+    [iyzicoPaymentId, JSON.stringify(iyzicoResult), conversationId],
+  );
+
+  // Fetch full payment record to get mode info
+  const paymentResult = await pool.query(
+    `SELECT p.*, p.order_ids
+     FROM payments p
+     WHERE p.provider_reference = $1
+     LIMIT 1`,
+    [iyzicoPaymentId],
+  );
+
+  if (paymentResult.rows.length === 0) return null;
+
+  const payment = paymentResult.rows[0];
+  const { session_id, participant_id, payment_mode, target_id, order_ids } =
+    payment;
+
+  // "item" mode: mark specific orders as paid
+  if (payment_mode === "item" && order_ids) {
+    const ids = Array.isArray(order_ids) ? order_ids : JSON.parse(order_ids);
+    if (ids.length > 0) {
+      const placeholders = ids.map((_, i) => `$${i + 2}`).join(",");
+      await pool.query(
+        `UPDATE orders SET paid_by = $1 WHERE id IN (${placeholders})`,
+        [participant_id, ...ids],
+      );
+    }
+  }
+
+  // Update session paid_amount (all modes)
+  await pool.query(
+    `UPDATE table_sessions
+     SET paid_amount = (
+       SELECT COALESCE(SUM(amount), 0)
+       FROM payments
+       WHERE session_id = $1 AND status = 'completed'
+     )
+     WHERE id = $1`,
+    [session_id],
+  );
+
+  // Check remaining balance — close session if fully paid
+  const balanceResult = await pool.query("SELECT get_remaining_balance($1)", [
+    session_id,
+  ]);
+  const remainingBalance = parseFloat(
+    balanceResult.rows[0].get_remaining_balance,
+  );
+
+  if (remainingBalance <= 0) {
+    await pool.query(
+      "UPDATE table_sessions SET status = 'closed', closed_at = NOW() WHERE id = $1",
+      [session_id],
+    );
+  }
+
+  // Fetch extra context for WebSocket event
+  let targetName = null;
+  if (payment_mode === "other" && target_id) {
+    const targetResult = await pool.query(
+      "SELECT name FROM participants WHERE id = $1",
+      [target_id],
+    );
+    if (targetResult.rows.length > 0) targetName = targetResult.rows[0].name;
+  }
+
+  let orderNames = null;
+  if (payment_mode === "item" && order_ids) {
+    const ids = Array.isArray(order_ids) ? order_ids : JSON.parse(order_ids);
+    if (ids.length > 0) {
+      const placeholders = ids.map((_, i) => `$${i + 1}`).join(",");
+      const ordersResult = await pool.query(
+        `SELECT name FROM orders WHERE id IN (${placeholders})`,
+        ids,
+      );
+      orderNames = ordersResult.rows.map((o) => o.name).join(", ");
+    }
+  }
+
+  return { payment, session_id, remainingBalance, targetName, orderNames };
+}
+
+// ─── ROUTES ────────────────────────────────────────────────────────
 
 router.post(
   "/initiate",
   validateSchema(iyzicoInitiateSchema),
   async (req, res) => {
     try {
-      const { sessionToken, participantId, amount, paymentMode, card } =
-        req.body;
-      console.log("[IYZICO] Initiate request:", {
+      const {
         sessionToken,
         participantId,
         amount,
         paymentMode,
-      });
+        targetId,
+        orderIds,
+        card,
+      } = req.body;
 
-      // Validate session and participant
       const session = await getSessionData(sessionToken);
-      console.log("[IYZICO] Session data:", session);
       if (!session) {
         return res.status(404).json({ error: "Oturum bulunamadı" });
       }
 
-      // Create pending payment record
       const { paymentId, conversationId } = await createPendingPayment(
         session.session_id,
         participantId,
         amount,
         paymentMode,
+        targetId,
+        orderIds,
       );
-      console.log("[IYZICO] Payment created:", { paymentId, conversationId });
 
-      // Get basket items for Iyzico
       const basketItems = await getBasketItems(session.session_id);
-      console.log("[IYZICO] Basket items:", basketItems);
 
-      // Prepare Iyzico request
-      const iyzcoRequest = {
+      const iyzicoRequest = {
         locale: "tr",
-        conversationId: conversationId,
+        conversationId,
         price: amount.toString(),
         paidPrice: amount.toString(),
         currency: "TRY",
@@ -202,45 +289,27 @@ router.post(
           address: "N/A",
           zipCode: "00000",
         },
-        basketItems: basketItems,
+        basketItems,
         callbackUrl: process.env.IYZICO_CALLBACK_URL,
       };
 
-      // Call Iyzico API
-      console.log(
-        "[IYZICO] Calling API with request:",
-        JSON.stringify(iyzcoRequest, null, 2),
-      );
-
-      try {
-        getIyzico().threedsPayment.create(iyzcoRequest, (err, result) => {
-          console.log("[IYZICO] Callback invoked");
-          if (err) {
-            console.error("[IYZICO] API Error:", err);
-            return res.status(400).json({
-              error:
-                "Ödeme başlatılamadı: " + (err.message || "Bilinmeyen hata"),
-            });
-          }
-
-          console.log("[IYZICO] API Result:", result);
-          if (result.status !== "success") {
-            return res.status(400).json({
-              error: result.errorMessage || "Ödeme başlatılamadı",
-            });
-          }
-
-          // Return HTML content for 3DS form
-          res.json({
-            htmlContent: result.htmlContent,
-            threeDsServerTransId: result.threeDsServerTransId,
-            paymentId: paymentId,
+      getIyzico().threedsPayment.create(iyzicoRequest, (err, result) => {
+        if (err) {
+          return res.status(400).json({
+            error: "Ödeme başlatılamadı: " + (err.message || "Bilinmeyen hata"),
           });
+        }
+        if (result.status !== "success") {
+          return res
+            .status(400)
+            .json({ error: result.errorMessage || "Ödeme başlatılamadı" });
+        }
+        res.json({
+          htmlContent: result.htmlContent,
+          threeDsServerTransId: result.threeDsServerTransId,
+          paymentId,
         });
-      } catch (iyzicoErr) {
-        console.error("[IYZICO] getIyzico error:", iyzicoErr);
-        return res.status(500).json({ error: "Ödeme sistemi hatası" });
-      }
+      });
     } catch (err) {
       console.error("Iyzico initiate error:", err);
       res.status(500).json({ error: "Sunucu hatası" });
@@ -250,19 +319,17 @@ router.post(
 
 router.post("/callback", async (req, res) => {
   try {
-    const { token, status, paymentId, conversationId } = req.body;
+    const { token, conversationId } = req.body;
 
     if (!token || !conversationId) {
       return res.status(400).json({ error: "Geçersiz callback" });
     }
 
-    // Retrieve payment from Iyzico
     getIyzico().threedsPayment.retrieve(
-      { token: token, conversationId: conversationId },
+      { token, conversationId },
       async (err, result) => {
         if (err) {
           console.error("Iyzico retrieve error:", err);
-          // Send error page to iframe
           return res.send(
             "<html><body><h1>Hata</h1><p>Ödeme doğrulanamadı. Lütfen tekrar deneyin.</p></body></html>",
           );
@@ -272,41 +339,37 @@ router.post("/callback", async (req, res) => {
           result.status === "success" &&
           result.paymentStatus === "CAPTURED"
         ) {
-          // Update payment record
-          await pool.query(
-            `UPDATE payments
-             SET status = $1, completed_at = NOW(), provider_reference = $2, provider_payload = $3
-             WHERE provider_reference = $4`,
-            [
-              "completed",
-              result.paymentId,
-              JSON.stringify(result),
-              conversationId,
-            ],
+          const data = await finalizePayment(
+            conversationId,
+            result.paymentId,
+            result,
           );
 
-          // Get session for WebSocket broadcast
-          const paymentResult = await pool.query(
-            `SELECT session_id FROM payments WHERE provider_reference = $1 LIMIT 1`,
-            [result.paymentId],
-          );
+          if (data) {
+            const {
+              payment,
+              session_id,
+              remainingBalance,
+              targetName,
+              orderNames,
+            } = data;
 
-          if (paymentResult.rows.length > 0) {
-            const sessionId = paymentResult.rows[0].session_id;
-
-            // Emit WebSocket event to all participants
             websocketService.emitToRoom(
-              `table_${sessionId}`,
+              `table_${session_id}`,
               "payment_completed",
               {
                 paymentId: result.paymentId,
-                amount: result.paidPrice,
-                message: "Ödeme başarılı",
+                participantId: payment.participant_id,
+                amount: payment.amount,
+                paymentMode: payment.payment_mode,
+                remainingBalance,
+                allSettled: remainingBalance <= 0,
+                targetName,
+                orderNames,
               },
             );
           }
 
-          // Send success page to iframe
           return res.send(
             `<html><body style="text-align:center;padding:50px;font-family:sans-serif">
               <h1 style="color:green">✓ Ödeme Başarılı</h1>
@@ -320,17 +383,11 @@ router.post("/callback", async (req, res) => {
           // Mark payment as failed
           await pool.query(
             `UPDATE payments
-             SET status = $1, provider_reference = $2, provider_payload = $3
-             WHERE provider_reference = $4`,
-            [
-              "failed",
-              result.paymentId || null,
-              JSON.stringify(result),
-              conversationId,
-            ],
+             SET status = 'failed', provider_reference = $1, provider_payload = $2
+             WHERE provider_reference = $3`,
+            [result.paymentId || null, JSON.stringify(result), conversationId],
           );
 
-          // Send error page to iframe
           return res.send(
             `<html><body style="text-align:center;padding:50px;font-family:sans-serif;color:red">
               <h1>✗ Ödeme Başarısız</h1>
