@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { io } from "socket.io-client";
+import PrintReceiptModal from "../components/PrintReceiptModal";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
 const WS_URL = import.meta.env.VITE_WS_URL || "http://localhost:3000";
@@ -19,6 +20,8 @@ export default function TablesPage() {
   const [showCashPaymentModal, setShowCashPaymentModal] = useState(false);
   const [cashPaymentType, setCashPaymentType] = useState("cash");
   const [cashPaymentLoading, setCashPaymentLoading] = useState(false);
+  const [showPrintModal, setShowPrintModal] = useState(false);
+  const [printSession, setPrintSession] = useState(null);
 
   const user = JSON.parse(localStorage.getItem("user") || "{}");
   const canClose = ["owner", "head_waiter"].includes(user.role);
@@ -168,9 +171,19 @@ export default function TablesPage() {
       if (!res.ok) throw new Error(result.error);
       setShowCashPaymentModal(false);
       setCashPaymentType("cash");
+      const paidSession = {
+        id: selectedTable.session_id,
+        table_number: selectedTable.table_number,
+        total_bill: selectedTable.total_bill,
+        paid_amount: selectedTable.total_bill,
+      };
+      const paidOrders = (selectedTable.orders || []).filter(
+        (o) => o.status !== "cancelled",
+      );
       setSelectedTable(null);
       fetchData();
-      alert(`Hesap ödendi! (${cashPaymentType})`);
+      setPrintSession({ session: paidSession, orders: paidOrders });
+      setShowPrintModal(true);
     } catch (err) {
       alert(err.message);
     } finally {
@@ -622,13 +635,35 @@ export default function TablesPage() {
                 )}
 
                 {canClose && parseFloat(selectedTable.remaining || 0) === 0 && (
-                  <button
-                    onClick={() => handleCloseTable(selectedTable.session_id)}
-                    disabled={closing}
-                    className="w-full bg-green-600 text-white py-3 rounded-xl font-semibold hover:bg-green-700 disabled:opacity-50"
-                  >
-                    {closing ? "Kapatılıyor..." : "✓ Masayı Kapat"}
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleCloseTable(selectedTable.session_id)}
+                      disabled={closing}
+                      className="flex-1 bg-green-600 text-white py-3 rounded-xl font-semibold hover:bg-green-700 disabled:opacity-50"
+                    >
+                      {closing ? "Kapatılıyor..." : "✓ Masayı Kapat"}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setPrintSession({
+                          session: {
+                            id: selectedTable.session_id,
+                            table_number: selectedTable.table_number,
+                            total_bill: selectedTable.total_bill,
+                            paid_amount: selectedTable.total_bill,
+                          },
+                          orders: (selectedTable.orders || []).filter(
+                            (o) => o.status !== "cancelled",
+                          ),
+                        });
+                        setShowPrintModal(true);
+                      }}
+                      className="px-4 py-3 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200"
+                      title="Fiş Yazdır"
+                    >
+                      🖨️
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
@@ -907,6 +942,18 @@ export default function TablesPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Print Receipt Modal */}
+      {showPrintModal && printSession && (
+        <PrintReceiptModal
+          session={printSession.session}
+          orders={printSession.orders}
+          onClose={() => {
+            setShowPrintModal(false);
+            setPrintSession(null);
+          }}
+        />
       )}
     </div>
   );

@@ -21,6 +21,7 @@ const apiRoutes = require("./routes/api");
 const { router: authRoutes } = require("./routes/auth");
 const adminRoutes = require("./routes/admin");
 const paymentIyzicoRoutes = require("./routes/payment-iyzico");
+const printerRoutes = require("./routes/printer");
 
 const app = express();
 const server = http.createServer(app);
@@ -147,6 +148,7 @@ app.use("/api", authRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api", apiRoutes);
 app.use("/api/payment/iyzico", paymentIyzicoRoutes);
+app.use("/api/admin/printer", printerRoutes);
 
 // Health check
 app.get("/health", (req, res) => {

@@ -24,6 +24,7 @@
     "iyzipay": "^2.0.67",
     "joi": "^17.11.0",
     "jsonwebtoken": "^9.0.2",
+    "node-thermal-printer": "^4.6.0",
     "pg": "^8.11.3",
     "redis": "^4.6.10",
     "socket.io": "^4.7.2",
