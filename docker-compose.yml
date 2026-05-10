@@ -51,13 +51,15 @@ services:
       PORT: 3000
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379
-      FRONTEND_URL: http://localhost:5173
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
       JWT_SECRET: ${JWT_SECRET}
-      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-12h}
       IYZICO_API_KEY: ${IYZICO_API_KEY}
       IYZICO_SECRET_KEY: ${IYZICO_SECRET_KEY}
-      IYZICO_BASE_URL: https://sandbox-api.iyzipay.com
-      IYZICO_CALLBACK_URL: http://localhost:3000/api/payment/iyzico/callback
+      IYZICO_BASE_URL: ${IYZICO_BASE_URL:-https://sandbox-api.iyzipay.com}
+      IYZICO_CALLBACK_URL: ${IYZICO_CALLBACK_URL:-http://localhost:3000/api/payment/iyzico/callback}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SENTRY_DSN: ${SENTRY_DSN:-}
     ports:
       - "3000:3000"
     volumes:
@@ -77,8 +79,8 @@ services:
       dockerfile: Dockerfile
     container_name: cafe_frontend
     environment:
-      VITE_API_URL: http://localhost:3000
-      VITE_WS_URL: http://localhost:3000
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
+      VITE_WS_URL: ${VITE_WS_URL:-http://localhost:3000}
       API_URL: http://cafe_api:3000
     ports:
       - "5173:5173"
