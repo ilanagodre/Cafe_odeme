@@ -761,6 +761,26 @@ export default function TablesPage() {
               </div>
             </div>
 
+            <button
+              onClick={() => {
+                setPrintSession({
+                  session: {
+                    id: selectedTable.session_id,
+                    table_number: selectedTable.table_number,
+                    total_bill: selectedTable.total_bill,
+                    paid_amount: selectedTable.remaining,
+                  },
+                  orders: (selectedTable.orders || []).filter(
+                    (o) => o.status !== "cancelled",
+                  ),
+                });
+                setShowPrintModal(true);
+              }}
+              className="w-full py-3 mb-3 bg-gray-100 text-gray-700 rounded-xl font-medium hover:bg-gray-200"
+            >
+              🖨️ Fişi Önce Yazdır
+            </button>
+
             <div className="flex gap-3">
               <button
                 onClick={() => setShowCashPaymentModal(false)}
