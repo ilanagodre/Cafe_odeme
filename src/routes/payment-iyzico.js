@@ -4,6 +4,7 @@ const Joi = require("joi");
 const pool = require("../config/database");
 const { getIyzico } = require("../config/iyzico");
 const websocketService = require("../websocket/websocket.service");
+const logger = require("../config/logger");
 
 const router = express.Router();
 
@@ -34,7 +35,7 @@ function validateSchema(schema) {
 }
 
 const iyzicoInitiateSchema = Joi.object({
-  sessionToken: Joi.string().length(32).required(),
+  sessionToken: Joi.string().uuid().required(),
   participantId: Joi.string().uuid().required(),
   amount: Joi.number().positive().precision(2).required(),
   paymentMode: Joi.string().valid("self", "all", "other", "item").required(),
@@ -311,7 +312,7 @@ router.post(
         });
       });
     } catch (err) {
-      console.error("Iyzico initiate error:", err);
+      logger.error("Iyzico initiate error:", err);
       res.status(500).json({ error: "Sunucu hatası" });
     }
   },
@@ -329,7 +330,7 @@ router.post("/callback", async (req, res) => {
       { token, conversationId },
       async (err, result) => {
         if (err) {
-          console.error("Iyzico retrieve error:", err);
+          logger.error("Iyzico retrieve error:", err);
           return res.send(
             "<html><body><h1>Hata</h1><p>Ödeme doğrulanamadı. Lütfen tekrar deneyin.</p></body></html>",
           );
@@ -401,7 +402,7 @@ router.post("/callback", async (req, res) => {
       },
     );
   } catch (err) {
-    console.error("Iyzico callback error:", err);
+    logger.error("Iyzico callback error:", err);
     res.send(
       "<html><body><h1>Hata</h1><p>Bir hata oluştu. Lütfen tekrar deneyin.</p></body></html>",
     );

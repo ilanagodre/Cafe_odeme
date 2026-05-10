@@ -19,7 +19,7 @@ app.use('/api', apiRouter);
 describe('Split Calculation Endpoints', () => {
 
   beforeEach(() => {
-    mockPool.query.mockClear();
+    mockPool.query.mockReset();
   });
 
   describe('POST /api/split/calculate', () => {

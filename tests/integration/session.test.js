@@ -20,7 +20,7 @@ app.use('/api', apiRouter);
 describe('Session Endpoints', () => {
 
   beforeEach(() => {
-    mockPool.query.mockClear();
+    mockPool.query.mockReset();
   });
 
   describe('POST /api/session/join', () => {

@@ -82,8 +82,8 @@ router.post("/session/join", validate("sessionJoin"), async (req, res) => {
       participant: participant.rows[0],
     });
   } catch (err) {
-    console.error("[ERR] Join session:", err.message, err.stack);
-    res.status(500).json({ error: "Masaya katılamadı: " + err.message });
+    logger.error("[ERR] Join session:", err.message, err.stack);
+    res.status(500).json({ error: process.env.NODE_ENV === "production" ? "Masaya katılamadı" : "Masaya katılamadı: " + err.message });
   }
 });
 
@@ -125,7 +125,7 @@ router.get("/session/:sessionToken", async (req, res) => {
       remainingBalance: parseFloat(balanceResult.rows[0].get_remaining_balance),
     });
   } catch (err) {
-    console.error("[ERR] Get session:", err);
+    logger.error("[ERR] Get session:", err);
     res.status(500).json({ error: "Failed to get session state" });
   }
 });
@@ -161,7 +161,7 @@ router.post("/order", validate("placeOrder"), async (req, res) => {
 
     res.json({ order: order.rows[0] });
   } catch (err) {
-    console.error("[ERR] Place order:", err);
+    logger.error("[ERR] Place order:", err);
     res.status(500).json({ error: "Failed to place order" });
   }
 });
@@ -209,7 +209,7 @@ router.post("/split/calculate", async (req, res) => {
 
     res.json(result);
   } catch (err) {
-    console.error("[ERR] Split calculation:", err);
+    logger.error("[ERR] Split calculation:", err);
     res.status(500).json({ error: "Failed to calculate split" });
   }
 });
@@ -261,7 +261,7 @@ router.post("/payment", validate("payment"), async (req, res) => {
       message: "Payment successful (mock)",
     });
   } catch (err) {
-    console.error("[ERR] Payment:", err);
+    logger.error("[ERR] Payment:", err);
     res.status(500).json({ error: "Payment failed" });
   }
 });
@@ -326,7 +326,7 @@ router.post("/payment/full", validate("paymentFull"), async (req, res) => {
       message: newBalance <= 0 ? "Tüm hesap ödendi! 🎉" : "Ödeme alındı",
     });
   } catch (err) {
-    console.error("[ERR] Full payment:", err);
+    logger.error("[ERR] Full payment:", err);
     res.status(500).json({ error: "Payment failed" });
   }
 });
@@ -388,7 +388,7 @@ router.post("/payment/for", validate("paymentFor"), async (req, res) => {
       message: `${target.rows[0].name}'ın hesabı ödendi`,
     });
   } catch (err) {
-    console.error("[ERR] Pay for:", err);
+    logger.error("[ERR] Pay for:", err);
     res.status(500).json({ error: "Payment failed" });
   }
 });
@@ -466,7 +466,7 @@ router.post("/payment/item", validate("paymentItem"), async (req, res) => {
       message: `${orders.rows.length} sipariş ödendi (ısmarladım!)`,
     });
   } catch (err) {
-    console.error("[ERR] Item payment:", err);
+    logger.error("[ERR] Item payment:", err);
     res.status(500).json({ error: "Payment failed" });
   }
 });

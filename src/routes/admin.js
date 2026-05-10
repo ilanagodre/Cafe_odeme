@@ -158,7 +158,7 @@ router.get('/dashboard', requireRole('owner', 'head_waiter'), async (req, res) =
       recentSessions: recentSessions.rows
     });
   } catch (err) {
-    console.error('[ERR] Dashboard:', err);
+    logger.error('[ERR] Dashboard:', err);
     res.status(500).json({ error: 'Failed to fetch dashboard data' });
   }
 });
@@ -261,7 +261,7 @@ router.get('/reports', requireRole('owner', 'head_waiter'), async (req, res) => 
       period
     });
   } catch (err) {
-    console.error('[ERR] Reports:', err);
+    logger.error('[ERR] Reports:', err);
     res.status(500).json({ error: 'Raporlar yüklenemedi' });
   }
 });
@@ -280,7 +280,7 @@ router.get('/menu', async (req, res) => {
     `);
     res.json({ items: result.rows });
   } catch (err) {
-    console.error('[ERR] Menu list:', err);
+    logger.error('[ERR] Menu list:', err);
     res.status(500).json({ error: 'Menü yüklenemedi' });
   }
 });
@@ -307,7 +307,7 @@ router.post('/menu', requireRole('owner'), async (req, res) => {
 
     res.json({ item: result.rows[0] });
   } catch (err) {
-    console.error('[ERR] Add menu item:', err);
+    logger.error('[ERR] Add menu item:', err);
     res.status(500).json({ error: 'Ürün eklenemedi' });
   }
 });
@@ -354,7 +354,7 @@ router.patch('/menu/:id', requireRole('owner'), async (req, res) => {
 
     res.json({ message: 'Ürün güncellendi' });
   } catch (err) {
-    console.error('[ERR] Update menu item:', err);
+    logger.error('[ERR] Update menu item:', err);
     res.status(500).json({ error: 'Ürün güncellenemedi' });
   }
 });
@@ -374,7 +374,7 @@ router.delete('/menu/:id', requireRole('owner'), async (req, res) => {
 
     res.json({ message: 'Ürün silindi' });
   } catch (err) {
-    console.error('[ERR] Delete menu item:', err);
+    logger.error('[ERR] Delete menu item:', err);
     res.status(500).json({ error: 'Ürün silinemedi' });
   }
 });
@@ -392,7 +392,7 @@ router.get('/audit-logs', requireRole('owner'), async (req, res) => {
     `);
     res.json({ logs: result.rows });
   } catch (err) {
-    console.error('[ERR] Audit logs:', err);
+    logger.error('[ERR] Audit logs:', err);
     res.status(500).json({ error: 'Kayıtlar yüklenemedi' });
   }
 });
@@ -417,8 +417,8 @@ router.post('/tables', requireRole('owner'), async (req, res) => {
 
     res.json({ table: result.rows[0] });
   } catch (err) {
-    console.error('[ERR] Add table:', err);
-    res.status(500).json({ error: 'Masa eklenemedi: ' + err.message });
+    logger.error('[ERR] Add table:', err);
+    res.status(500).json({ error: process.env.NODE_ENV === 'production' ? 'Masa eklenemedi' : 'Masa eklenemedi: ' + err.message });
   }
 });
 
@@ -478,7 +478,7 @@ router.post('/tables/:tableId/open-session',
         sessionToken: newSession.rows[0].session_token
       });
     } catch (err) {
-      console.error('[ERR] Open table session:', err);
+      logger.error('[ERR] Open table session:', err);
       res.status(500).json({ error: 'Masa açılamadı' });
     }
   }
@@ -547,7 +547,7 @@ router.post('/tables/:tableId/participant',
         participant: participant.rows[0]
       });
     } catch (err) {
-      console.error('[ERR] Admin add participant:', err);
+      logger.error('[ERR] Admin add participant:', err);
       res.status(500).json({ error: 'Katılımcı eklenemedi' });
     }
   }
@@ -566,7 +566,7 @@ router.patch('/tables/:tableId', requireRole('owner'), async (req, res) => {
 
     res.json({ message: 'Masa güncellendi' });
   } catch (err) {
-    console.error('[ERR] Update table:', err);
+    logger.error('[ERR] Update table:', err);
     res.status(500).json({ error: 'Masa güncellenemedi' });
   }
 });
@@ -590,7 +590,7 @@ router.delete('/tables/:tableId', requireRole('owner'), async (req, res) => {
 
     res.json({ message: 'Masa silindi' });
   } catch (err) {
-    console.error('[ERR] Delete table:', err);
+    logger.error('[ERR] Delete table:', err);
     res.status(500).json({ error: 'Masa silinemedi' });
   }
 });
@@ -647,7 +647,7 @@ router.get('/tables', requireRole('owner', 'head_waiter', 'waiter'), async (req,
       history: history.rows
     });
   } catch (err) {
-    console.error('[ERR] Tables list:', err);
+    logger.error('[ERR] Tables list:', err);
     res.status(500).json({ error: 'Masalar yüklenemedi' });
   }
 });
@@ -714,8 +714,8 @@ router.post('/tables/:sessionId/cash-payment',
         paymentType
       });
     } catch (err) {
-      console.error('[ERR] Cash payment:', err);
-      res.status(500).json({ error: 'Ödeme işlemi başarısız: ' + err.message });
+      logger.error('[ERR] Cash payment:', err);
+      res.status(500).json({ error: process.env.NODE_ENV === 'production' ? 'Ödeme işlemi başarısız' : 'Ödeme işlemi başarısız: ' + err.message });
     }
   }
 );
@@ -759,7 +759,7 @@ router.post('/tables/:sessionId/close', requireRole('owner', 'head_waiter'), asy
 
     res.json({ message: 'Masa kapatıldı' });
   } catch (err) {
-    console.error('[ERR] Close table:', err);
+    logger.error('[ERR] Close table:', err);
     res.status(500).json({ error: 'Masa kapatılamadı' });
   }
 });
@@ -780,7 +780,7 @@ router.get('/orders', requireRole('owner', 'head_waiter', 'waiter'), async (req,
     `);
     res.json({ orders: result.rows });
   } catch (err) {
-    console.error('[ERR] Orders list:', err);
+    logger.error('[ERR] Orders list:', err);
     res.status(500).json({ error: 'Siparişler yüklenemedi' });
   }
 });
@@ -798,7 +798,7 @@ router.patch('/orders/:orderId/status', requireRole('owner', 'head_waiter', 'wai
     await pool.query('UPDATE orders SET status = $1 WHERE id = $2', [status, orderId]);
     res.json({ message: 'Durum güncellendi' });
   } catch (err) {
-    console.error('[ERR] Update order status:', err);
+    logger.error('[ERR] Update order status:', err);
     res.status(500).json({ error: 'Durum güncellenemedi' });
   }
 });
@@ -839,7 +839,7 @@ router.post('/orders/:orderId/cancel', requireRole('owner', 'head_waiter'), asyn
 
     res.json({ message: 'Sipariş iptal edildi' });
   } catch (err) {
-    console.error('[ERR] Cancel order:', err);
+    logger.error('[ERR] Cancel order:', err);
     res.status(500).json({ error: 'Sipariş iptal edilemedi' });
   }
 });

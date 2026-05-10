@@ -85,9 +85,7 @@ app.use("/api", (req, res, next) => {
             timestamp: ts,
           });
         })
-        .catch((err) =>
-          console.error("[WS] order_added broadcast error:", err),
-        );
+        .catch((err) => logger.error("[WS] order_added broadcast error:", err));
     }
 
     const paymentPaths = [
@@ -136,7 +134,7 @@ app.use("/api", (req, res, next) => {
             timestamp: ts,
           });
         })
-        .catch((err) => console.error("[WS] payment broadcast error:", err));
+        .catch((err) => logger.error("[WS] payment broadcast error:", err));
     }
 
     return originalJson(data);
@@ -162,13 +160,12 @@ app.use(errorHandler);
 // ─── Start server ──────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`\n🚀 Cafe Payment API running on port ${PORT}`);
-  console.log(`📡 WebSocket server ready`);
-  console.log(`🔗 Health: http://localhost:${PORT}/health\n`);
+  logger.info(`Cafe Payment API running on port ${PORT}`);
+  logger.info(`Health: http://localhost:${PORT}/health`);
 });
 
 // Graceful shutdown
 process.on("SIGTERM", () => {
-  console.log("[APP] SIGTERM received, shutting down...");
+  logger.info("[APP] SIGTERM received, shutting down...");
   server.close(() => process.exit(0));
 });

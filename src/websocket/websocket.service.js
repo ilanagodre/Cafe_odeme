@@ -1,3 +1,4 @@
+const logger = require("../config/logger");
 const { Server } = require("socket.io");
 const { createClient } = require("redis");
 const { createAdapter } = require("@socket.io/redis-adapter");
@@ -22,13 +23,13 @@ class WebSocketService {
       const subClient = pubClient.duplicate();
       await Promise.all([pubClient.connect(), subClient.connect()]);
       this.io.adapter(createAdapter(pubClient, subClient));
-      console.log("[WS] Redis adapter connected");
+      logger.info("[WS] Redis adapter connected");
     } catch (err) {
-      console.log("[WS] Redis not available, using in-memory adapter");
+      logger.info("[WS] Redis not available, using in-memory adapter");
     }
 
     this.io.on("connection", (socket) => {
-      console.log(`[WS] Connected: ${socket.id}`);
+      logger.info(`[WS] Connected: ${socket.id}`);
 
       // ─── Join table session ──────────────────────────
       socket.on("join_table", async ({ sessionToken, participantId }) => {
@@ -65,7 +66,7 @@ class WebSocketService {
           const fullState = await this.getSessionState(sessionId);
           socket.emit("table_state", fullState);
 
-          console.log(`[WS] ${participantId} joined ${roomName}`);
+          logger.info(`[WS] ${participantId} joined ${roomName}`);
         } catch (err) {
           socket.emit("error", { message: "Failed to join table" });
         }
@@ -99,7 +100,7 @@ class WebSocketService {
       });
     });
 
-    console.log("[WS] Server initialized");
+    logger.info("[WS] Server initialized");
   }
 
   // ─── Broadcast helpers (called from routes) ──────────

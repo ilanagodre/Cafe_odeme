@@ -4,12 +4,11 @@
  */
 
 const mockPool = {
-  query: jest.fn()
+  query: jest.fn(),
 };
 
-// Reset all mocks after each test
 afterEach(() => {
-  mockPool.query.mockClear();
+  mockPool.query.mockReset();
 });
 
 module.exports = mockPool;

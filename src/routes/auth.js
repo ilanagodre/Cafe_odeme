@@ -64,7 +64,7 @@ router.post('/auth/login', loginLimiter, validate('login'), async (req, res) => 
       }
     });
   } catch (err) {
-    console.error('[ERR] Auth login:', err);
+    logger.error('[ERR] Auth login:', err);
     res.status(500).json({ error: 'Giriş başarısız' });
   }
 });

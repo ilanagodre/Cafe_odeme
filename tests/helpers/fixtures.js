@@ -3,37 +3,38 @@
  * Shared test data and utility functions
  */
 
-const { v4: uuid } = require('uuid');
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
+const { v4: uuid } = require("uuid");
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
 
-const TEST_SECRET = 'dev-secret-change-in-prod';
-const TEST_PIN = '1234';
+const TEST_SECRET = "dev-secret-change-in-prod";
+const TEST_PIN = "1234";
 const TEST_PIN_HASH = bcrypt.hashSync(TEST_PIN, 10);
 
 /**
  * Generate test UUIDs
  */
-const TABLE_ID = 'table-' + uuid();
-const SESSION_ID = 'session-' + uuid();
-const PARTICIPANT_ID_1 = 'participant-' + uuid();
-const PARTICIPANT_ID_2 = 'participant-' + uuid();
-const PARTICIPANT_ID_3 = 'participant-' + uuid();
-const ORDER_ID_1 = 'order-' + uuid();
-const ORDER_ID_2 = 'order-' + uuid();
-const ORDER_ID_3 = 'order-' + uuid();
-const STAFF_ID = 'staff-' + uuid();
-const SESSION_TOKEN = 'token-' + uuid();
+const TABLE_ID = uuid();
+const SESSION_ID = uuid();
+const PARTICIPANT_ID_1 = uuid();
+const PARTICIPANT_ID_2 = uuid();
+const PARTICIPANT_ID_3 = uuid();
+const ORDER_ID_1 = uuid();
+const ORDER_ID_2 = uuid();
+const ORDER_ID_3 = uuid();
+const STAFF_ID = uuid();
+const SESSION_TOKEN = uuid();
+const NONEXISTENT_ID = "00000000-0000-0000-0000-000000000000";
 
 /**
  * Mock table data
  */
 const mockTable = {
   id: TABLE_ID,
-  name: 'Masa 1',
-  qr_code: 'QR-' + uuid(),
+  name: "Masa 1",
+  qr_code: "QR-" + uuid(),
   created_at: new Date(),
-  status: 'active'
+  status: "active",
 };
 
 /**
@@ -46,9 +47,9 @@ const mockSession = {
   session_number: 1,
   total_bill: 300,
   paid_amount: 0,
-  status: 'active',
+  status: "active",
   created_at: new Date(),
-  closed_at: null
+  closed_at: null,
 };
 
 /**
@@ -57,25 +58,25 @@ const mockSession = {
 const mockParticipant1 = {
   id: PARTICIPANT_ID_1,
   session_id: SESSION_ID,
-  name: 'Ali',
+  name: "Ali",
   is_host: true,
-  joined_at: new Date()
+  joined_at: new Date(),
 };
 
 const mockParticipant2 = {
   id: PARTICIPANT_ID_2,
   session_id: SESSION_ID,
-  name: 'Aylin',
+  name: "Aylin",
   is_host: false,
-  joined_at: new Date()
+  joined_at: new Date(),
 };
 
 const mockParticipant3 = {
   id: PARTICIPANT_ID_3,
   session_id: SESSION_ID,
-  name: 'Kerem',
+  name: "Kerem",
   is_host: false,
-  joined_at: new Date()
+  joined_at: new Date(),
 };
 
 const mockParticipants = [mockParticipant1, mockParticipant2, mockParticipant3];
@@ -86,40 +87,40 @@ const mockParticipants = [mockParticipant1, mockParticipant2, mockParticipant3];
 const mockOrder1 = {
   id: ORDER_ID_1,
   session_id: SESSION_ID,
-  name: 'Kahve',
+  name: "Kahve",
   quantity: 2,
   price: 50,
   total_price: 100,
   ordered_by: PARTICIPANT_ID_1,
-  status: 'completed',
+  status: "completed",
   paid_by: null,
-  created_at: new Date()
+  created_at: new Date(),
 };
 
 const mockOrder2 = {
   id: ORDER_ID_2,
   session_id: SESSION_ID,
-  name: 'Çay',
+  name: "Çay",
   quantity: 1,
   price: 30,
   total_price: 30,
   ordered_by: PARTICIPANT_ID_2,
-  status: 'completed',
+  status: "completed",
   paid_by: null,
-  created_at: new Date()
+  created_at: new Date(),
 };
 
 const mockOrder3 = {
   id: ORDER_ID_3,
   session_id: SESSION_ID,
-  name: 'Tatlı',
+  name: "Tatlı",
   quantity: 1,
   price: 170,
   total_price: 170,
   ordered_by: PARTICIPANT_ID_3,
-  status: 'completed',
+  status: "completed",
   paid_by: null,
-  created_at: new Date()
+  created_at: new Date(),
 };
 
 const mockOrders = [mockOrder1, mockOrder2, mockOrder3];
@@ -130,22 +131,20 @@ const mockOrders = [mockOrder1, mockOrder2, mockOrder3];
 const mockStaff = {
   id: STAFF_ID,
   table_id: TABLE_ID,
-  role: 'owner',
-  name: 'Admin',
+  role: "owner",
+  name: "Admin",
   pin_hash: TEST_PIN_HASH,
   created_at: new Date(),
-  status: 'active'
+  status: "active",
 };
 
 /**
  * Helper to create JWT token
  */
-function makeToken(role = 'owner', userId = STAFF_ID, expiresIn = '1h') {
-  return jwt.sign(
-    { id: userId, name: 'Test User', role },
-    TEST_SECRET,
-    { expiresIn }
-  );
+function makeToken(role = "owner", userId = STAFF_ID, expiresIn = "1h") {
+  return jwt.sign({ id: userId, name: "Test User", role }, TEST_SECRET, {
+    expiresIn,
+  });
 }
 
 /**
@@ -174,6 +173,7 @@ module.exports = {
   ORDER_ID_3,
   STAFF_ID,
   SESSION_TOKEN,
+  NONEXISTENT_ID,
   // Mock data
   mockTable,
   mockSession,
@@ -188,5 +188,5 @@ module.exports = {
   mockStaff,
   // Helpers
   makeToken,
-  verifyToken
+  verifyToken,
 };

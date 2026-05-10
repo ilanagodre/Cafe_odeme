@@ -10,7 +10,7 @@ const pool = new Pool({
 });
 
 // Test connection
-pool.on('connect', () => console.log('[DB] Connected to PostgreSQL'));
-pool.on('error', (err) => console.error('[DB] Pool error:', err));
+pool.on('connect', () => require('./logger').info('[DB] Connected to PostgreSQL'));
+pool.on('error', (err) => require('./logger').error('[DB] Pool error:', err));
 
 module.exports = pool;

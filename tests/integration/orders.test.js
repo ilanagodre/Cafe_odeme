@@ -3,93 +3,95 @@
  * Testing: /api/order
  */
 
-const request = require('supertest');
-const express = require('express');
-const mockPool = require('../helpers/mockPool');
-const { SESSION_ID, SESSION_TOKEN, PARTICIPANT_ID_1, ORDER_ID_1, mockOrder1 } = require('../helpers/fixtures');
+const request = require("supertest");
+const express = require("express");
+const mockPool = require("../helpers/mockPool");
+const {
+  SESSION_ID,
+  SESSION_TOKEN,
+  PARTICIPANT_ID_1,
+  ORDER_ID_1,
+  mockOrder1,
+  NONEXISTENT_ID,
+} = require("../helpers/fixtures");
 
-jest.mock('../../src/config/database', () => require('../helpers/mockPool'));
+jest.mock("../../src/config/database", () => require("../helpers/mockPool"));
 
-const apiRouter = require('../../src/routes/api');
+const apiRouter = require("../../src/routes/api");
 
 const app = express();
 app.use(express.json());
-app.use('/api', apiRouter);
+app.use("/api", apiRouter);
 
-describe('Order Endpoints', () => {
-
+describe("Order Endpoints", () => {
   beforeEach(() => {
-    mockPool.query.mockClear();
+    mockPool.query.mockReset();
   });
 
-  describe('POST /api/order', () => {
-
-    test('should place order successfully', async () => {
+  describe("POST /api/order", () => {
+    test("should place order successfully", async () => {
       const orderData = {
         sessionToken: SESSION_TOKEN,
-        itemName: 'Kahve',
+        itemName: "Kahve",
         quantity: 2,
         price: 50,
-        orderedBy: PARTICIPANT_ID_1
+        orderedBy: PARTICIPANT_ID_1,
       };
 
       mockPool.query
         .mockResolvedValueOnce({ rows: [{ id: SESSION_ID }] }) // Find active session
-        .mockResolvedValueOnce({ rows: [{ id: ORDER_ID_1, name: 'Kahve', quantity: 2, total_price: '100' }] }) // Insert order
+        .mockResolvedValueOnce({
+          rows: [
+            { id: ORDER_ID_1, name: "Kahve", quantity: 2, total_price: "100" },
+          ],
+        }) // Insert order
         .mockResolvedValueOnce({ rows: [] }); // Update session total_bill
 
-      const res = await request(app)
-        .post('/api/order')
-        .send(orderData);
+      const res = await request(app).post("/api/order").send(orderData);
 
       expect(res.status).toBe(200);
-      expect(res.body.order.name).toBe('Kahve');
+      expect(res.body.order.name).toBe("Kahve");
       expect(res.body.order.quantity).toBe(2);
-      expect(res.body.order.total_price).toBe('100');
+      expect(res.body.order.total_price).toBe("100");
     });
 
-    test('should return 404 for inactive session', async () => {
+    test("should return 404 for inactive session", async () => {
       const orderData = {
-        sessionToken: 'INVALID-TOKEN',
-        itemName: 'Kahve',
+        sessionToken: NONEXISTENT_ID,
+        itemName: "Kahve",
         quantity: 1,
         price: 50,
-        orderedBy: PARTICIPANT_ID_1
+        orderedBy: PARTICIPANT_ID_1,
       };
 
-      mockPool.query
-        .mockResolvedValueOnce({ rows: [] }); // Active session not found
+      mockPool.query.mockResolvedValueOnce({ rows: [] }); // Active session not found
 
-      const res = await request(app)
-        .post('/api/order')
-        .send(orderData);
+      const res = await request(app).post("/api/order").send(orderData);
 
       expect(res.status).toBe(404);
       expect(res.body.error).toMatch(/not found/i);
     });
 
-    test('should calculate total price correctly', async () => {
+    test("should calculate total price correctly", async () => {
       const orderData = {
         sessionToken: SESSION_TOKEN,
-        itemName: 'Çay',
+        itemName: "Çay",
         quantity: 5,
         price: 30,
-        orderedBy: PARTICIPANT_ID_1
+        orderedBy: PARTICIPANT_ID_1,
       };
 
       mockPool.query
         .mockResolvedValueOnce({ rows: [{ id: SESSION_ID }] }) // Find active session
-        .mockResolvedValueOnce({ rows: [{ ...orderData, total_price: '150.00' }] }) // Insert order
+        .mockResolvedValueOnce({
+          rows: [{ ...orderData, total_price: "150.00" }],
+        }) // Insert order
         .mockResolvedValueOnce({ rows: [] }); // Update session total_bill
 
-      const res = await request(app)
-        .post('/api/order')
-        .send(orderData);
+      const res = await request(app).post("/api/order").send(orderData);
 
       expect(res.status).toBe(200);
-      expect(res.body.order.total_price).toBe('150.00');
+      expect(res.body.order.total_price).toBe("150.00");
     });
-
   });
-
 });
