@@ -1,8 +1,8 @@
 # Cafe Payment System - Deployment Guide
 
-**Version:** 1.0  
-**Last Updated:** 2026-04-19  
-**Status:** MVP Ready for Production with Security Hardening
+**Version:** 1.1  
+**Last Updated:** 2026-05-10  
+**Status:** MVP Ready for Production with Printer Integration & Backup Automation
 
 ---
 
@@ -27,9 +27,37 @@ docker compose up -d
 ```
 
 **Default credentials:**
+
 - PIN: 1234 (Owner - Patron)
 - Waiter PIN: 1234 (Mehmet, Elif)
 - Head Waiter PIN: 1234 (Ahmet)
+
+## Quick Start (Production)
+
+```bash
+# 1. Clone repository
+git clone <repo>
+cd Cafe_odeme
+
+# 2. Create production environment file
+cp .env.production .env.production  # Already exists as template
+
+# 3. Configure environment (CRITICAL)
+# Edit .env.production with:
+# - Strong JWT_SECRET (openssl rand -hex 32)
+# - Strong POSTGRES_PASSWORD
+# - Production domain URLs
+# - Printer hardware IPs (if applicable)
+# - Iyzico production keys (if using payments)
+# - Sentry DSN (if using error tracking)
+
+# 4. Start with production env file
+docker compose --env-file .env.production up -d
+
+# 5. Verify all services
+docker compose ps
+curl http://localhost:3000/health
+```
 
 ---
 
@@ -61,30 +89,182 @@ REDIS_URL=redis://redis:6379
 LOG_LEVEL=info
 ```
 
-### Production (.env.prod)
+### Production (.env.production)
+
+**Template available:** `.env.production` (check in repo)
 
 ```env
-# API Configuration
+# ─── Environment ──────────────────────────────────────────
 NODE_ENV=production
-API_PORT=3000
-FRONTEND_URL=https://yourdomain.com
+PORT=3000
 
-# JWT Security (MUST change this!)
-JWT_SECRET=$(openssl rand -hex 32)
+# ─── Database ──────────────────────────────────────────────
+POSTGRES_USER=cafe_user
+POSTGRES_PASSWORD=<STRONG_PASSWORD>         # openssl rand -hex 32
+POSTGRES_DB=cafe_payment
+DATABASE_URL=postgresql://cafe_user:<PASSWORD>@postgres:5432/cafe_payment
+
+# ─── Redis ────────────────────────────────────────────────
+REDIS_URL=redis://redis:6379
+
+# ─── Security ─────────────────────────────────────────────
+JWT_SECRET=<STRONG_VALUE>                  # openssl rand -hex 32
 JWT_EXPIRES_IN=12h
 
-# Database (Use strong password!)
-POSTGRES_DB=cafe_payment_prod
-POSTGRES_USER=cafe_app
-POSTGRES_PASSWORD=$(openssl rand -hex 16)
-POSTGRES_HOST=postgres.internal
-POSTGRES_PORT=5432
+# ─── Frontend URLs (CHANGE to your domain) ─────────────────
+FRONTEND_URL=https://yourdomain.com
+VITE_API_URL=https://yourdomain.com
+VITE_WS_URL=https://yourdomain.com
 
-# Redis (Use Redis authentication in prod)
-REDIS_URL=redis://:PASSWORD@redis.internal:6379
+# ─── Yazıcı (Printer) ──────────────────────────────────────
+# Boş bırakılırsa yazıcı devre dışı — browser print çalışmaya devam eder
+CAFE_NAME=Kafe Adınız
+RECEIPT_PRINTER_HOST=192.168.1.50          # Leave empty to disable
+RECEIPT_PRINTER_PORT=9100
+KITCHEN_PRINTER_HOST=192.168.1.51          # Leave empty to disable
+KITCHEN_PRINTER_PORT=9100
 
-# Logging
-LOG_LEVEL=error
+# ─── Iyzico Payment ───────────────────────────────────────
+IYZICO_API_KEY=<PRODUCTION_API_KEY>
+IYZICO_SECRET_KEY=<PRODUCTION_SECRET_KEY>
+IYZICO_BASE_URL=https://api.iyzipay.com    # Production URL
+IYZICO_CALLBACK_URL=https://yourdomain.com/api/payment/iyzico/callback
+
+# ─── Monitoring ────────────────────────────────────────────
+SENTRY_DSN=<YOUR_SENTRY_PROJECT_DSN>       # Optional but recommended
+LOG_LEVEL=warn                              # Production: warn or error
+```
+
+**Generation Script:**
+
+```bash
+# Generate secure secrets for production
+JWT_SECRET=$(openssl rand -hex 32)
+DB_PASSWORD=$(openssl rand -hex 32)
+
+echo "JWT_SECRET=$JWT_SECRET"
+echo "POSTGRES_PASSWORD=$DB_PASSWORD"
+```
+
+---
+
+## Printer Hardware Setup (Optional)
+
+If you have network-enabled thermal printers:
+
+### Supported Printers
+
+- Epson TM-T20II, TM-T70II, TM-T80II, TM-T82II (or newer)
+- Any thermal printer supporting ESC/POS protocol over TCP/IP
+
+### Network Configuration
+
+1. **Connect printer to your network:**
+   - Configure printer's IP address via control panel
+   - Use static IP or DHCP reservation
+   - Ensure printer is on same network as Docker host
+
+2. **Test printer connectivity:**
+
+   ```bash
+   # From your Docker host
+   nc -zv 192.168.1.50 9100
+   # Expected: Connection to 192.168.1.50 9100 [tcp/*] succeeded!
+   ```
+
+3. **Configure in .env.production:**
+
+   ```env
+   # Receipt printer (fiş yazıcısı)
+   RECEIPT_PRINTER_HOST=192.168.1.50
+   RECEIPT_PRINTER_PORT=9100
+
+   # Kitchen printer (mutfak yazıcısı)
+   KITCHEN_PRINTER_HOST=192.168.1.51
+   KITCHEN_PRINTER_PORT=9100
+
+   # Cafe name (printed as header)
+   CAFE_NAME=Kafe Adınız
+   ```
+
+4. **Test from API:**
+
+   ```bash
+   # After deployment, test printer via API
+   curl -X POST http://localhost:3000/api/admin/printer/test \
+     -H "Authorization: Bearer <JWT_TOKEN>" \
+     -H "Content-Type: application/json" \
+     -d '{"printerType":"receipt"}'
+
+   # Response should be: {"message":"Yazıcı bağlandı",...}
+   ```
+
+5. **If printer not available:**
+   - Leave `RECEIPT_PRINTER_HOST` and `KITCHEN_PRINTER_HOST` empty
+   - System will use browser print as fallback
+   - No errors, just graceful degradation
+
+### Troubleshooting Printer Issues
+
+```bash
+# Check if printer is responding to ping
+ping 192.168.1.50
+
+# Check if TCP port 9100 is open
+nc -zv 192.168.1.50 9100
+
+# View API logs for printer errors
+docker compose logs api | grep -i printer
+
+# Check printer configuration in admin panel
+# → Settings → Printer Status
+```
+
+---
+
+## Database Backup Automation
+
+### Automatic Daily Backups
+
+Setup file: `database/setup-cron.sh`
+
+```bash
+# On production server (Docker host), run once:
+cd /path/to/Cafe_odeme
+./database/setup-cron.sh
+
+# This creates a cron job that runs daily at 2 AM:
+# 0 2 * * * cd /path/to/Cafe_odeme && ./database/backup.sh >> .backups/cron.log 2>&1
+
+# Verify cron job installed:
+crontab -l | grep backup.sh
+```
+
+### Manual Backup
+
+```bash
+# Create manual backup (Docker running)
+./database/backup.sh
+
+# Backup file location: .backups/cafe_db_backup_YYYY-MM-DD_HH-MM-SS.sql
+
+# Test restore
+./database/restore.sh .backups/cafe_db_backup_*.sql
+
+# Cleanup old backups (>30 days)
+find .backups -name "*.sql" -mtime +30 -delete
+```
+
+### Backup Verification
+
+```bash
+# List backup files
+ls -lh .backups/
+
+# Check backup integrity (PostgreSQL)
+docker compose exec postgres pg_dump -U cafe_user \
+  -d cafe_payment --format=plain \
+  > /dev/null && echo "Backup OK"
 ```
 
 ---
@@ -93,18 +273,19 @@ LOG_LEVEL=error
 
 ### Services Overview
 
-| Service | Port | Health Check | Role |
-|---------|------|--------------|------|
-| API | 3000 | `GET /health` | Express server + WebSocket |
-| Frontend | 5173 | HTTP 200 | Vite dev server (development) |
-| PostgreSQL | 5432 | Connection test | Primary database |
-| Redis | 6379 | PING response | Session/WebSocket broker |
+| Service    | Port | Health Check    | Role                          |
+| ---------- | ---- | --------------- | ----------------------------- |
+| API        | 3000 | `GET /health`   | Express server + WebSocket    |
+| Frontend   | 5173 | HTTP 200        | Vite dev server (development) |
+| PostgreSQL | 5432 | Connection test | Primary database              |
+| Redis      | 6379 | PING response   | Session/WebSocket broker      |
 
 ### Docker Compose Files
 
 **Production Override** (`docker-compose.prod.yml`):
+
 ```yaml
-version: '3.8'
+version: "3.8"
 services:
   api:
     environment:
@@ -113,17 +294,17 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2'
+          cpus: "2"
           memory: 2G
 
   frontend:
     build:
-      target: production  # Use production build
+      target: production # Use production build
     restart: always
     deploy:
       resources:
         limits:
-          cpus: '1'
+          cpus: "1"
           memory: 1G
 
   postgres:
@@ -131,19 +312,21 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2'
+          cpus: "2"
           memory: 4G
 ```
 
 ### Starting Services
 
 **Development:**
+
 ```bash
 docker compose up -d
 docker compose logs -f api
 ```
 
 **Production:**
+
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 docker compose exec api npm run migrate
@@ -151,6 +334,7 @@ docker compose ps
 ```
 
 **Stopping:**
+
 ```bash
 docker compose down
 docker compose down -v  # Also remove volumes
@@ -163,6 +347,7 @@ docker compose down -v  # Also remove volumes
 ### Initial Setup (Automatic)
 
 On first `docker compose up`, the database automatically runs:
+
 1. `database/schema.sql` - Creates tables
 2. `database/seed.sql` - Adds demo data
 3. `database/migration_phase1.sql` - Creates users and functions
@@ -180,11 +365,13 @@ docker exec cafe_db psql -U cafe_user -d cafe_payment -c "\dt"
 ### Backup & Recovery
 
 **Create Backup:**
+
 ```bash
 docker exec cafe_db pg_dump -U cafe_user -d cafe_payment > backup.sql
 ```
 
 **Restore from Backup:**
+
 ```bash
 docker exec -i cafe_db psql -U cafe_user -d cafe_payment < backup.sql
 ```
@@ -194,10 +381,12 @@ docker exec -i cafe_db psql -U cafe_user -d cafe_payment < backup.sql
 ## API Endpoints
 
 ### Authentication
+
 - `POST /api/auth/login` - Staff login with PIN
 - Response: JWT token (expires in 12h)
 
 ### Admin Panel (Protected)
+
 - `GET /api/admin/tables` - List all tables with active sessions
 - `POST /api/admin/tables/:tableId/participant` - **Add customer to table** (waiter order flow)
 - `POST /api/admin/staff` - Create staff member (owner only)
@@ -208,6 +397,7 @@ docker exec -i cafe_db psql -U cafe_user -d cafe_payment < backup.sql
 - `POST /api/admin/tables/:sessionId/close` - Close session
 
 ### Customer (Public)
+
 - `POST /api/session/join` - Join session with QR code
 - `GET /api/menu` - Get menu items
 - `POST /api/order` - Place order
@@ -216,6 +406,7 @@ docker exec -i cafe_db psql -U cafe_user -d cafe_payment < backup.sql
 - `GET /api/payment/summary/:sessionToken` - Payment summary
 
 ### Health Check
+
 - `GET /health` - API health status
 
 ---
@@ -268,12 +459,14 @@ docker exec cafe_redis redis-cli ping
 ### REQUIRED Before Production Deployment
 
 1. **JWT Secret** (CRITICAL)
+
    ```bash
    JWT_SECRET=$(openssl rand -hex 32)
    # Save to .env - DO NOT commit
    ```
 
 2. **Database Password** (CRITICAL)
+
    ```bash
    POSTGRES_PASSWORD=$(openssl rand -hex 16)
    # Save to .env - DO NOT commit
@@ -289,13 +482,15 @@ docker exec cafe_redis redis-cli ping
    - Protects against brute force attacks
 
 5. **Security Headers** (HIGH)
+
    ```
    X-Content-Type-Options: nosniff
    X-Frame-Options: DENY
    Content-Security-Policy: default-src 'self'
    Strict-Transport-Security: max-age=31536000
    ```
-   *(Implement via nginx or helmet.js)*
+
+   _(Implement via nginx or helmet.js)_
 
 6. **Input Validation** (HIGH)
    - All endpoints validate request data
@@ -501,21 +696,60 @@ curl http://localhost:3000/health
 
 ## Support & Documentation
 
-- API Documentation: `API.md`
+- API Documentation: `API_DOCUMENTATION.md` (printer endpoints added)
 - Security Guidelines: `SECURITY.md`
 - Development Setup: `README.md`
-- Architecture: `ARCHITECTURE.md`
-- Testing: `TESTING.md`
+- Database Schema: `DATABASE_SCHEMA.md`
+- Deployment Checklist: `DEPLOYMENT_CHECKLIST.md`
+- Backup Strategy: `BACKUP_STRATEGY.md`
+- Project Status: `PROJECT_STATUS.md`
+
+---
+
+## Production Deployment Summary
+
+**Minimal steps to go live:**
+
+```bash
+# 1. Generate secrets
+JWT_SECRET=$(openssl rand -hex 32)
+DB_PASSWORD=$(openssl rand -hex 32)
+
+# 2. Edit .env.production with your values
+FRONTEND_URL=https://yourdomain.com
+IYZICO_CALLBACK_URL=https://yourdomain.com/api/payment/iyzico/callback
+# ... (see Environment Configuration section above)
+
+# 3. Setup backup automation (on Docker host)
+./database/setup-cron.sh
+
+# 4. Deploy with production config
+docker compose --env-file .env.production up -d
+
+# 5. Verify health
+curl https://yourdomain.com/health
+```
+
+**Printer setup (optional):**
+
+```bash
+# After deployment, test printer connectivity:
+curl -X POST https://yourdomain.com/api/admin/printer/test \
+  -H "Authorization: Bearer <JWT_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"printerType":"receipt"}'
+```
 
 ---
 
 ## Version History
 
-| Date | Version | Changes |
-|------|---------|---------|
-| 2026-04-19 | 1.0 | Initial deployment guide with waiter order module, security requirements, and scaling guidelines |
+| Date       | Version | Changes                                                                                          |
+| ---------- | ------- | ------------------------------------------------------------------------------------------------ |
+| 2026-05-10 | 1.1     | Network printer setup, backup automation, .env.production guide, production quick start          |
+| 2026-04-19 | 1.0     | Initial deployment guide with waiter order module, security requirements, and scaling guidelines |
 
 ---
 
-**Last Reviewed:** 2026-04-19  
-**Next Review:** 2026-07-19
+**Last Reviewed:** 2026-05-10  
+**Next Review:** 2026-08-10

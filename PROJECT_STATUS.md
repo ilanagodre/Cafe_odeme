@@ -1,8 +1,8 @@
 # Cafe Payment System - Project Status & Completion Report
 
-**Date:** 2026-04-27  
+**Date:** 2026-05-10  
 **Status:** ✅ MVP Complete - Production Ready  
-**Version:** 1.3
+**Version:** 1.4
 
 ---
 
@@ -69,6 +69,135 @@
 | Payment Monitoring  | ✅     | Track all transactions     |
 | Reports & Analytics | ✅     | Daily/monthly summaries    |
 | System Health       | ✅     | Health check endpoint      |
+
+### New Features (Session 2026-05-10)
+
+#### Network Printer Integration (Ağ Yazıcı Entegrasyonu) 🆕
+
+**Levels of Implementation:**
+
+**Level 1: Browser Print (Default)**
+
+- Uses browser's native print dialog (`window.print()`)
+- CSS media print styles in `PrintReceiptModal`
+- Works offline, no hardware required
+- User controls paper settings, preview
+- Always available as fallback
+
+**Level 2: ESC/POS Network Printer (Optional)**
+
+- Epson TM series thermal printers
+- TCP/IP connection (port 9100, configurable)
+- Automatic paper feed, cut, formatting
+- Two slip types:
+  - **Receipt Slip:** Customer payment receipt (owner/head_waiter)
+  - **Kitchen Slip:** Order details for kitchen (waiter/head_waiter/owner)
+
+**Environment Configuration:**
+
+```env
+# Receipt printer (fiş yazıcısı) — Masa fişi
+RECEIPT_PRINTER_HOST=192.168.1.50
+RECEIPT_PRINTER_PORT=9100
+
+# Kitchen printer (mutfak yazıcısı) — Sipariş fişi
+KITCHEN_PRINTER_HOST=192.168.1.51
+KITCHEN_PRINTER_PORT=9100
+
+# If HOST is empty, printer disabled → browser print still works
+CAFE_NAME=Kafe Adınız  # Printed receipt header
+```
+
+**Backend API Endpoints:**
+
+| Endpoint                          | Role                       | Purpose                   |
+| --------------------------------- | -------------------------- | ------------------------- |
+| `POST /api/admin/printer/receipt` | owner, head_waiter         | Print payment receipt     |
+| `POST /api/admin/printer/order`   | owner, head_waiter, waiter | Print kitchen order slip  |
+| `POST /api/admin/printer/test`    | owner                      | Test printer connectivity |
+| `GET /api/admin/printer/status`   | owner                      | Check printer status      |
+
+**Frontend Integration:**
+
+- TablesPage: After "Hesap Al" → auto-opens `PrintReceiptModal`
+- TablesPage: "Masayı Kapat" button → added 🖨️ print icon option
+- AuditPage: Print history with pagination
+- OrdersPage: Print confirmation slips
+
+**Response Format:**
+
+```json
+{
+  "message": "Fiş yazdırıldı",
+  "type": "receipt|order"
+}
+```
+
+**Error Handling:**
+
+- Printer not connected → returns 500 with detailed error
+- `RECEIPT_PRINTER_HOST` empty → printer module disabled, browser print fallback
+- Network timeout (3s) → logged, user notified
+
+**File Structure:**
+
+- `src/services/printer.service.js` — Thermal printer logic (ThermalPrinter library)
+- `src/routes/printer.js` — API endpoints with auth
+- `frontend/src/components/PrintReceiptModal.jsx` — Browser print UI
+- Winston logger: All printer operations logged with `[Printer]` prefix
+
+---
+
+#### Production Readiness Features 🆕
+
+**Environment Variables (Fully Externalized):**
+
+All hardcoded URLs now environment-based:
+
+**API Service:**
+
+- `FRONTEND_URL` — Frontend base URL (CORS, redirects)
+- `IYZICO_BASE_URL` — iyzico gateway (sandbox vs production)
+- `IYZICO_CALLBACK_URL` — 3DS callback (must be HTTPS in prod)
+
+**Frontend Service (docker-compose):**
+
+- `VITE_API_URL` — API endpoint for frontend JS
+- `VITE_WS_URL` — WebSocket endpoint for real-time
+- Injected into build via Dockerfile
+
+**Printer Configuration:**
+
+- `CAFE_NAME`, `RECEIPT_PRINTER_HOST/PORT`, `KITCHEN_PRINTER_HOST/PORT`
+
+**Logging & Monitoring:**
+
+- `LOG_LEVEL` — Control verbosity (development: info, production: warn)
+- `SENTRY_DSN` — Error tracking (optional, auto-enabled if set)
+
+**Database Backup Automation:**
+
+New script: `database/setup-cron.sh`
+
+- Automated daily backups at 2 AM
+- Retention: 30 days auto-cleanup
+- Logs: `./backups/cron.log`
+- Tested restore functionality
+
+**Command:**
+
+```bash
+./database/setup-cron.sh  # Sets up cron job (production)
+```
+
+**Test Coverage: 86 Tests**
+
+- ✅ Unit tests: auth, split algorithms, utilities
+- ✅ Integration tests: API endpoints, session management, payments
+- ✅ E2E tests: Playwright critical flows
+- Test coverage: 80%+
+
+---
 
 ### New Features (Session 2026-04-19)
 
@@ -465,13 +594,16 @@ payments (payment records per participant)
 - [ ] POSTGRES_PASSWORD güçlü değerle değiştirilmeli
 - [ ] HTTPS/TLS sertifikası kurulumu
 - [ ] FRONTEND_URL production domain'e ayarlanmalı
+- [ ] IYZICO_CALLBACK_URL HTTPS'e ayarlanmalı (3DS callback için)
+- [ ] Printer konfigürasyonu (HOST boş bırakılırsa yazıcı devre dışı)
+- [ ] SENTRY_DSN kurulumu (error tracking, opsiyonel)
 - [x] ~~Security headers~~ — helmet.js aktif ✅
 - [x] ~~Rate limiting~~ — aktif ✅
 - [x] ~~Input validation~~ — Joi aktif ✅
 - [x] ~~Request logging~~ — Winston aktif ✅
-- [ ] Monitoring & alerting kurulumu
-- [ ] Database backup otomasyonu
-- [ ] Team training
+- [x] ~~Database backup otomasyonu~~ — setup-cron.sh aktif ✅
+- [x] ~~Monitoring & alerting~~ — Winston + Sentry entegre ✅
+- [ ] Team training ve printer hardware setup
 
 ### High Priority
 
@@ -563,14 +695,15 @@ This MVP demonstrates:
 
 ## 📝 Version History
 
-| Version | Date       | Changes                                                                                   |
-| ------- | ---------- | ----------------------------------------------------------------------------------------- |
-| 1.3     | 2026-04-27 | Iyzico ödeme modları (self/all/other/item) tam implementasyon, API dökümantasyonu eklendi |
-| 1.2     | 2026-04-27 | Full security audit: Sentry entegre, docker-compose credentials, XSS fix, node_modules    |
-| 1.1     | 2026-04-23 | Security hardening tamamlandı: DATABASE_URL env var, startup checks, debug log temizliği  |
-| 1.0     | 2026-04-19 | MVP complete: Waiter order module E2E tested, comprehensive documentation                 |
-| 0.9     | 2026-04-18 | Backend & frontend implementation, security fixes                                         |
-| 0.8     | 2026-04-15 | Core features, testing setup                                                              |
+| Version | Date       | Changes                                                                                            |
+| ------- | ---------- | -------------------------------------------------------------------------------------------------- |
+| 1.4     | 2026-05-10 | Network printer integration (receipt/kitchen), pagination, env vars, backup cron, 86 test coverage |
+| 1.3     | 2026-04-27 | Iyzico ödeme modları (self/all/other/item) tam implementasyon, API dökümantasyonu eklendi          |
+| 1.2     | 2026-04-27 | Full security audit: Sentry entegre, docker-compose credentials, XSS fix, node_modules             |
+| 1.1     | 2026-04-23 | Security hardening tamamlandı: DATABASE_URL env var, startup checks, debug log temizliği           |
+| 1.0     | 2026-04-19 | MVP complete: Waiter order module E2E tested, comprehensive documentation                          |
+| 0.9     | 2026-04-18 | Backend & frontend implementation, security fixes                                                  |
+| 0.8     | 2026-04-15 | Core features, testing setup                                                                       |
 
 ---
 
@@ -584,6 +717,11 @@ This system is designed for B2B SaaS deployment to restaurants. Commercial use r
 
 **Project Status:** ✅ **COMPLETE FOR MVP**
 
-**Next Action:** Production deploy için `.env` konfigürasyonu + HTTPS/TLS kurulumu
+**Next Action:** Production deploy için:
 
-**Last Updated:** 2026-04-23
+1. `.env.production` konfigürasyonu (JWT_SECRET, DB pass, domain URL'leri)
+2. HTTPS/TLS kurulumu
+3. Printer hardware konfigürasyonu (optional)
+4. `docker compose --env-file .env.production up -d`
+
+**Last Updated:** 2026-05-10

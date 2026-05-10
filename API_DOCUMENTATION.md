@@ -12,9 +12,10 @@
 2. [Customer Flow](#customer-flow)
 3. [Split Payment Algorithms](#split-payment-algorithms)
 4. [Staff/Admin APIs](#staffadmin-apis)
-5. [Error Handling](#error-handling)
-6. [Rate Limiting](#rate-limiting)
-7. [WebSocket Events](#websocket-events)
+5. [Printer APIs](#printer-apis-network-thermal-printers)
+6. [Error Handling](#error-handling)
+7. [Rate Limiting](#rate-limiting)
+8. [WebSocket Events](#websocket-events)
 
 ---
 
@@ -1112,7 +1113,243 @@ Authorization: Bearer {token}
 
 ---
 
-## Rate Limiting
+## Printer APIs (Network Thermal Printers)
+
+**Supported Hardware:** Epson TM series thermal printers (ESC/POS protocol)  
+**Connection:** TCP/IP (port 9100, configurable)  
+**Fallback:** Browser print always available if hardware not configured
+
+### Print Receipt (Payment Slip)
+
+**Endpoint:** `POST /api/admin/printer/receipt`
+
+**Headers:**
+
+```
+Authorization: Bearer {token}
+```
+
+**Required Role:** `owner`, `head_waiter`
+
+**Request:**
+
+```json
+{
+  "sessionId": 42
+}
+```
+
+**Response (Success - 200):**
+
+```json
+{
+  "message": "Fiş yazdırıldı"
+}
+```
+
+**Response (Error - 500):**
+
+```json
+{
+  "error": "Fiş yazıcısı yapılandırılmamış (RECEIPT_PRINTER_HOST)"
+}
+```
+
+**Behavior:**
+
+- Reads session details (table number, total bill, paid amount)
+- Fetches all non-cancelled orders
+- Prints formatted receipt with:
+  - Cafe name (header)
+  - Table number, date, time
+  - Item list with quantities and prices
+  - Total amount and payment type
+  - Footer message
+- Automatically cuts paper
+
+**Environment Configuration:**
+
+```env
+CAFE_NAME=Kafe Adınız
+RECEIPT_PRINTER_HOST=192.168.1.50          # Leave empty to disable
+RECEIPT_PRINTER_PORT=9100                   # Epson default
+```
+
+---
+
+### Print Kitchen Order Slip
+
+**Endpoint:** `POST /api/admin/printer/order`
+
+**Headers:**
+
+```
+Authorization: Bearer {token}
+```
+
+**Required Role:** `owner`, `head_waiter`, `waiter`
+
+**Request:**
+
+```json
+{
+  "sessionId": 42
+}
+```
+
+**Response (Success - 200):**
+
+```json
+{
+  "message": "Mutfak fişi yazdırıldı"
+}
+```
+
+**Response (Error - 404):**
+
+```json
+{
+  "error": "Sipariş bulunamadı"
+}
+```
+
+**Behavior:**
+
+- Fetches all non-cancelled orders for session
+- Prints kitchen slip with:
+  - Table number
+  - Participant name (who ordered)
+  - Items with quantities
+  - Timestamp
+- Used by kitchen staff to know what to prepare
+
+**Environment Configuration:**
+
+```env
+KITCHEN_PRINTER_HOST=192.168.1.51          # Leave empty to disable
+KITCHEN_PRINTER_PORT=9100
+```
+
+---
+
+### Test Printer Connection
+
+**Endpoint:** `POST /api/admin/printer/test`
+
+**Headers:**
+
+```
+Authorization: Bearer {token}
+```
+
+**Required Role:** `owner`
+
+**Request:**
+
+```json
+{
+  "printerType": "receipt" | "kitchen"
+}
+```
+
+**Response (Success - 200):**
+
+```json
+{
+  "message": "Yazıcı bağlandı",
+  "printerType": "receipt",
+  "host": "192.168.1.50",
+  "port": 9100
+}
+```
+
+**Response (Error - 500):**
+
+```json
+{
+  "error": "Yazıcıya bağlanılamadı: Connection timeout after 3000ms"
+}
+```
+
+**Behavior:**
+
+- Attempts TCP connection to printer
+- Tests ESC/POS protocol handshake
+- Useful for initial setup and troubleshooting
+- Timeout: 3 seconds
+
+---
+
+### Get Printer Status
+
+**Endpoint:** `GET /api/admin/printer/status`
+
+**Headers:**
+
+```
+Authorization: Bearer {token}
+```
+
+**Required Role:** `owner`
+
+**Response (Success - 200):**
+
+```json
+{
+  "receipt": {
+    "enabled": true,
+    "host": "192.168.1.50",
+    "port": 9100,
+    "connected": true
+  },
+  "kitchen": {
+    "enabled": true,
+    "host": "192.168.1.51",
+    "port": 9100,
+    "connected": false
+  }
+}
+```
+
+**Behavior:**
+
+- Returns configuration status of both printers
+- Attempts connection test (non-blocking)
+- `enabled: false` means HOST env var is empty
+- Used in admin settings panel
+
+---
+
+### Printer Integration in Frontend
+
+**TablesPage Component:**
+
+After "Hesap Al" (cash payment) modal closes:
+
+- `PrintReceiptModal` auto-opens
+- User can choose:
+  - 🖨️ Print on network printer (calls `/api/admin/printer/receipt`)
+  - 🖨️ Print via browser (window.print())
+
+**PrintReceiptModal Component:**
+
+```jsx
+// Browser print (always available)
+<button onClick={() => window.print()}>Browser Print</button>;
+
+// Network printer (if enabled)
+{
+  hasNetworkPrinter && (
+    <button onClick={() => apiCall("/api/admin/printer/receipt")}>
+      Network Printer
+    </button>
+  );
+}
+```
+
+---
+
+## Error Handling
 
 ### Login Endpoint
 
@@ -1280,4 +1517,4 @@ wscat -c ws://localhost:3000
 ---
 
 Generated: 2026-04-19  
-Last Updated: 2026-04-19
+Last Updated: 2026-05-10
