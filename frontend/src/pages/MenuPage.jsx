@@ -26,9 +26,8 @@ export default function MenuPage() {
 
   const fetchMenu = async () => {
     try {
-      const token = localStorage.getItem("token");
       const res = await fetch(`${API_URL}/api/admin/menu`, {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
       });
       if (!res.ok) throw new Error("Menü yüklenemedi");
       const data = await res.json();
@@ -42,9 +41,8 @@ export default function MenuPage() {
 
   const fetchCategories = async () => {
     try {
-      const token = localStorage.getItem("token");
       const res = await fetch(`${API_URL}/api/admin/menu/categories`, {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
       });
       if (!res.ok) throw new Error();
       const data = await res.json();
@@ -76,12 +74,11 @@ export default function MenuPage() {
       return;
     }
     try {
-      const token = localStorage.getItem("token");
       const res = await fetch(`${API_URL}/api/admin/menu`, {
+        credentials: "include",
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           ...formData,
@@ -101,12 +98,11 @@ export default function MenuPage() {
   const handleUpdateItem = async () => {
     if (!editItem) return;
     try {
-      const token = localStorage.getItem("token");
       const res = await fetch(`${API_URL}/api/admin/menu/${editItem.id}`, {
+        credentials: "include",
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(editItem),
       });
@@ -121,10 +117,9 @@ export default function MenuPage() {
   const handleDeleteItem = async (itemId) => {
     if (!confirm("Bu ürünü silmek istediğinize emin misiniz?")) return;
     try {
-      const token = localStorage.getItem("token");
       const res = await fetch(`${API_URL}/api/admin/menu/${itemId}`, {
+        credentials: "include",
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error("Silinemedi");
       fetchMenu();
@@ -137,12 +132,11 @@ export default function MenuPage() {
     if (!newCategoryName.trim()) return;
     setCategoryError("");
     try {
-      const token = localStorage.getItem("token");
       const res = await fetch(`${API_URL}/api/admin/menu/categories`, {
+        credentials: "include",
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ name: newCategoryName.trim() }),
       });
@@ -157,10 +151,9 @@ export default function MenuPage() {
 
   const handleDeleteCategory = async (id) => {
     try {
-      const token = localStorage.getItem("token");
       const res = await fetch(`${API_URL}/api/admin/menu/categories/${id}`, {
+        credentials: "include",
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);

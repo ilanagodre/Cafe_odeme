@@ -17,9 +17,8 @@ export default function OrdersPage() {
 
   const fetchOrders = async () => {
     try {
-      const token = localStorage.getItem("token");
       const res = await fetch(`${API_URL}/api/admin/orders`, {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
       });
       if (!res.ok) throw new Error("Siparişler yüklenemedi");
       const data = await res.json();
@@ -38,14 +37,13 @@ export default function OrdersPage() {
   const handleCancelOrder = async () => {
     if (!canCancel || !cancelModal) return;
     try {
-      const token = localStorage.getItem("token");
       const res = await fetch(
         `${API_URL}/api/admin/orders/${cancelModal.id}/cancel`,
         {
+        credentials: "include",
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({ reason: cancelReason || "Şef iptali" }),
         },
@@ -92,12 +90,11 @@ export default function OrdersPage() {
 
   const updateStatus = async (orderId, newStatus) => {
     try {
-      const token = localStorage.getItem("token");
       const res = await fetch(`${API_URL}/api/admin/orders/${orderId}/status`, {
+        credentials: "include",
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ status: newStatus }),
       });

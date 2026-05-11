@@ -31,9 +31,8 @@ export default function TablesPage() {
 
   const fetchData = async () => {
     try {
-      const token = localStorage.getItem("token");
       const res = await fetch(`${API_URL}/api/admin/tables`, {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
       });
       if (!res.ok) throw new Error("Masalar yüklenemedi");
       setData(await res.json());
@@ -50,10 +49,11 @@ export default function TablesPage() {
 
   // Real-time admin sync via WebSocket
   useEffect(() => {
-    const socket = io(WS_URL, { transports: ["websocket", "polling"] });
-    socket.on("connect", () =>
-      socket.emit("join_admin", { token: localStorage.getItem("token") }),
-    );
+    const socket = io(WS_URL, {
+      transports: ["websocket", "polling"],
+      withCredentials: true,
+    });
+    socket.on("connect", () => socket.emit("join_admin"));
 
     socket.on(
       "admin_order_updated",
@@ -136,12 +136,11 @@ export default function TablesPage() {
     if (!canClose) return;
     setClosing(true);
     try {
-      const token = localStorage.getItem("token");
       const res = await fetch(
         `${API_URL}/api/admin/tables/${sessionId}/close`,
         {
+          credentials: "include",
           method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
         },
       );
       const data = await res.json();
@@ -159,15 +158,12 @@ export default function TablesPage() {
     if (!canClose || !selectedTable) return;
     setCashPaymentLoading(true);
     try {
-      const token = localStorage.getItem("token");
       const res = await fetch(
         `${API_URL}/api/admin/tables/${sessionId}/cash-payment`,
         {
+          credentials: "include",
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ paymentType: cashPaymentType }),
         },
       );
@@ -198,13 +194,10 @@ export default function TablesPage() {
   const handleCancelOrder = async (orderId) => {
     if (!canClose) return;
     try {
-      const token = localStorage.getItem("token");
       const res = await fetch(`${API_URL}/api/admin/orders/${orderId}/cancel`, {
+        credentials: "include",
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reason: cancelReason || "Şef iptali" }),
       });
       const data = await res.json();
@@ -224,13 +217,10 @@ export default function TablesPage() {
       return;
     }
     try {
-      const token = localStorage.getItem("token");
       const res = await fetch(`${API_URL}/api/admin/tables`, {
+        credentials: "include",
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(tableForm),
       });
       const data = await res.json();
@@ -246,15 +236,12 @@ export default function TablesPage() {
   const handleUpdateTable = async () => {
     if (!editTable) return;
     try {
-      const token = localStorage.getItem("token");
       const res = await fetch(
         `${API_URL}/api/admin/tables/${editTable.table_id}`,
         {
+          credentials: "include",
           method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify(editTable),
         },
       );
@@ -269,10 +256,9 @@ export default function TablesPage() {
   const handleDeleteTable = async (tableId) => {
     if (!confirm("Bu masayı silmek istediğinize emin misiniz?")) return;
     try {
-      const token = localStorage.getItem("token");
       const res = await fetch(`${API_URL}/api/admin/tables/${tableId}`, {
+        credentials: "include",
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error("Silinemedi");
       fetchData();

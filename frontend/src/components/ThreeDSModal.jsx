@@ -11,7 +11,7 @@ export default function ThreeDSModal({
   useEffect(() => {
     const handleMessage = (event) => {
       const backendOrigin =
-        import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
+        import.meta.env.VITE_API_URL || "http://localhost:3000";
       if (event.origin !== backendOrigin) return;
       if (event.data.type === "payment_success") {
         onSuccess();

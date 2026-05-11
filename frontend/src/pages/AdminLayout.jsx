@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Outlet, useNavigate, useLocation, Link } from 'react-router-dom';
+import { useState, useEffect } from "react";
+import { Outlet, useNavigate, useLocation, Link } from "react-router-dom";
 import {
   LayoutDashboard,
   Users,
@@ -12,18 +12,65 @@ import {
   ChevronLeft,
   ChevronRight,
   Coffee,
-  ShoppingCart
-} from 'lucide-react';
+  ShoppingCart,
+} from "lucide-react";
 
 const NAV_ITEMS = [
-  { path: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['owner', 'head_waiter'] },
-  { path: '/admin/tables', label: 'Masalar', icon: Users, roles: ['owner', 'head_waiter', 'waiter'], active: true },
-  { path: '/admin/orders', label: 'Siparişler', icon: UtensilsCrossed, roles: ['owner', 'head_waiter', 'waiter'], active: true },
-  { path: '/admin/waiter-order', label: 'Sipariş Al', icon: ShoppingCart, roles: ['owner', 'head_waiter', 'waiter'], active: true },
-  { path: '/admin/staff', label: 'Personel', icon: UsersRound, roles: ['owner'], active: true },
-  { path: '/admin/menu', label: 'Menü', icon: ClipboardList, roles: ['owner'], active: true },
-  { path: '/admin/reports', label: 'Raporlar', icon: TrendingUp, roles: ['owner', 'head_waiter'], active: true },
-  { path: '/admin/audit', label: 'Kayıtlar', icon: FileText, roles: ['owner'], active: true },
+  {
+    path: "/admin/dashboard",
+    label: "Dashboard",
+    icon: LayoutDashboard,
+    roles: ["owner", "head_waiter"],
+  },
+  {
+    path: "/admin/tables",
+    label: "Masalar",
+    icon: Users,
+    roles: ["owner", "head_waiter", "waiter"],
+    active: true,
+  },
+  {
+    path: "/admin/orders",
+    label: "Siparişler",
+    icon: UtensilsCrossed,
+    roles: ["owner", "head_waiter", "waiter"],
+    active: true,
+  },
+  {
+    path: "/admin/waiter-order",
+    label: "Sipariş Al",
+    icon: ShoppingCart,
+    roles: ["owner", "head_waiter", "waiter"],
+    active: true,
+  },
+  {
+    path: "/admin/staff",
+    label: "Personel",
+    icon: UsersRound,
+    roles: ["owner"],
+    active: true,
+  },
+  {
+    path: "/admin/menu",
+    label: "Menü",
+    icon: ClipboardList,
+    roles: ["owner"],
+    active: true,
+  },
+  {
+    path: "/admin/reports",
+    label: "Raporlar",
+    icon: TrendingUp,
+    roles: ["owner", "head_waiter"],
+    active: true,
+  },
+  {
+    path: "/admin/audit",
+    label: "Kayıtlar",
+    icon: FileText,
+    roles: ["owner"],
+    active: true,
+  },
 ];
 
 export default function AdminLayout() {
@@ -33,46 +80,56 @@ export default function AdminLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    const storedUser = localStorage.getItem('user');
-
-    if (!token || !storedUser) {
-      navigate('/staff-login');
-      return;
-    }
-
-    try {
-      setUser(JSON.parse(storedUser));
-    } catch {
-      navigate('/staff-login');
-    }
+    const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+    fetch(`${API_URL}/api/auth/me`, { credentials: "include" })
+      .then((res) => (res.ok ? res.json() : Promise.reject()))
+      .then((data) => {
+        setUser(data.user);
+        localStorage.setItem("user", JSON.stringify(data.user));
+      })
+      .catch(() => navigate("/staff-login"));
   }, [navigate]);
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    navigate('/staff-login');
+  const handleLogout = async () => {
+    const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+    await fetch(`${API_URL}/api/auth/logout`, {
+      method: "POST",
+      credentials: "include",
+    });
+    localStorage.removeItem("user");
+    navigate("/staff-login");
   };
 
   if (!user) return null;
 
-  const filteredNav = NAV_ITEMS.filter(item =>
-    item.roles.includes(user.role)
+  const filteredNav = NAV_ITEMS.filter((item) =>
+    item.roles.includes(user.role),
   );
 
   return (
     <div className="min-h-screen bg-gray-100 flex">
       {/* Sidebar */}
-      <aside className={`bg-gray-900 text-white flex flex-col transition-all ${
-        sidebarOpen ? 'w-64' : 'w-20'
-      }`}>
+      <aside
+        className={`bg-gray-900 text-white flex flex-col transition-all ${
+          sidebarOpen ? "w-64" : "w-20"
+        }`}
+      >
         <div className="p-4 border-b border-gray-800 flex items-center justify-between">
-          <span className={`font-bold text-lg flex items-center gap-2 ${!sidebarOpen && 'hidden'}`}>
+          <span
+            className={`font-bold text-lg flex items-center gap-2 ${!sidebarOpen && "hidden"}`}
+          >
             <Coffee className="w-5 h-5" />
             CafePay Admin
           </span>
-          <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-1 hover:bg-gray-800 rounded">
-            {sidebarOpen ? <ChevronLeft className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
+          <button
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="p-1 hover:bg-gray-800 rounded"
+          >
+            {sidebarOpen ? (
+              <ChevronLeft className="w-5 h-5" />
+            ) : (
+              <ChevronRight className="w-5 h-5" />
+            )}
           </button>
         </div>
 
@@ -86,8 +143,11 @@ export default function AdminLayout() {
               <div>
                 <p className="font-medium text-sm">{user.name}</p>
                 <p className="text-xs text-gray-400 capitalize">
-                  {user.role === 'owner' ? 'Patron' :
-                   user.role === 'head_waiter' ? 'Şef' : 'Garson'}
+                  {user.role === "owner"
+                    ? "Patron"
+                    : user.role === "head_waiter"
+                      ? "Şef"
+                      : "Garson"}
                 </p>
               </div>
             )}
@@ -96,7 +156,7 @@ export default function AdminLayout() {
 
         {/* Navigation */}
         <nav data-testid="admin-nav" className="flex-1 py-4">
-          {filteredNav.map(item => {
+          {filteredNav.map((item) => {
             const isActive = location.pathname === item.path;
             return (
               <Link
@@ -104,12 +164,14 @@ export default function AdminLayout() {
                 to={item.path}
                 className={`flex items-center gap-3 px-4 py-3 mx-2 rounded-lg transition-colors ${
                   isActive
-                    ? 'bg-indigo-600 text-white'
-                    : 'text-gray-400 hover:bg-gray-800 hover:text-white'
+                    ? "bg-indigo-600 text-white"
+                    : "text-gray-400 hover:bg-gray-800 hover:text-white"
                 }`}
               >
                 <item.icon className="w-5 h-5" />
-                {sidebarOpen && <span className="text-sm font-medium">{item.label}</span>}
+                {sidebarOpen && (
+                  <span className="text-sm font-medium">{item.label}</span>
+                )}
               </Link>
             );
           })}
@@ -121,7 +183,7 @@ export default function AdminLayout() {
             data-testid="logout-btn"
             onClick={handleLogout}
             className={`flex items-center gap-3 text-gray-400 hover:text-white transition-colors w-full ${
-              !sidebarOpen && 'justify-center'
+              !sidebarOpen && "justify-center"
             }`}
           >
             <LogOut className="w-5 h-5" />

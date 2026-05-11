@@ -47,7 +47,8 @@ describe("Authentication Endpoints", () => {
       const res = await request(app).post("/api/auth/login").send({ pin });
 
       expect(res.status).toBe(200);
-      expect(res.body.token).toBeDefined();
+      expect(res.headers["set-cookie"]).toBeDefined();
+      expect(res.body.token).toBeUndefined();
       expect(res.body.user.id).toBe(STAFF_ID);
       expect(res.body.user.role).toBe("owner");
     });

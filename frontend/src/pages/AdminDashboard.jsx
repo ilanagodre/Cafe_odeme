@@ -12,9 +12,8 @@ export default function AdminDashboard() {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const token = localStorage.getItem('token');
         const res = await fetch(`${API_URL}/api/admin/dashboard`, {
-          headers: { Authorization: `Bearer ${token}` }
+        credentials: "include",
         });
 
         if (!res.ok) {

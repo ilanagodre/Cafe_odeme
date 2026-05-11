@@ -18,9 +18,8 @@ export default function StaffPage() {
 
   const fetchStaff = async () => {
     try {
-      const token = localStorage.getItem('token');
       const res = await fetch(`${API_URL}/api/admin/staff`, {
-        headers: { Authorization: `Bearer ${token}` }
+        credentials: "include",
       });
       if (!res.ok) throw new Error('Personel listesi yüklenemedi');
       const data = await res.json();
@@ -45,12 +44,11 @@ export default function StaffPage() {
     }
 
     try {
-      const token = localStorage.getItem('token');
       const res = await fetch(`${API_URL}/api/admin/staff`, {
+        credentials: "include",
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
         },
         body: JSON.stringify(newStaff)
       });
@@ -66,12 +64,11 @@ export default function StaffPage() {
 
   const handleUpdateRole = async (staffId, newRole) => {
     try {
-      const token = localStorage.getItem('token');
       const res = await fetch(`${API_URL}/api/admin/staff/${staffId}/role`, {
+        credentials: "include",
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({ role: newRole })
       });
@@ -84,12 +81,11 @@ export default function StaffPage() {
 
   const handleToggleActive = async (staffId, isActive) => {
     try {
-      const token = localStorage.getItem('token');
       const res = await fetch(`${API_URL}/api/admin/staff/${staffId}/active`, {
+        credentials: "include",
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({ is_active: isActive })
       });
@@ -107,12 +103,11 @@ export default function StaffPage() {
     }
 
     try {
-      const token = localStorage.getItem('token');
       const res = await fetch(`${API_URL}/api/admin/staff/${resetPinModal.id}/reset-pin`, {
+        credentials: "include",
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({ newPin })
       });

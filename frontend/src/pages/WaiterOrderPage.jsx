@@ -26,8 +26,6 @@ export default function WaiterOrderPage() {
   const [sessionToken, setSessionToken] = useState(null);
   const [menuCategoryFilter, setMenuCategoryFilter] = useState("all");
 
-  const token = localStorage.getItem("token");
-
   const [activeSessions, setActiveSessions] = useState([]);
 
   // Listen to real-time session updates via WebSocket
@@ -40,7 +38,7 @@ export default function WaiterOrderPage() {
         setLoading(true);
         const [tablesRes, menuRes] = await Promise.all([
           fetch("/api/admin/tables", {
-            headers: { Authorization: `Bearer ${token}` },
+            credentials: "include",
           }),
           fetch("/api/admin/menu"),
         ]);
@@ -62,7 +60,7 @@ export default function WaiterOrderPage() {
     };
 
     fetchData();
-  }, [token]);
+  }, []);
 
   // Update selectedTable when WebSocket receives new session state
   useEffect(() => {
@@ -119,10 +117,10 @@ export default function WaiterOrderPage() {
       const res = await fetch(
         `/api/admin/tables/${selectedTable.table_id}/open-session`,
         {
+          credentials: "include",
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
           },
         },
       );
@@ -159,10 +157,10 @@ export default function WaiterOrderPage() {
       const res = await fetch(
         `/api/admin/tables/${selectedTable.table_id}/participant`,
         {
+          credentials: "include",
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({
             participantName: newName,
@@ -250,10 +248,10 @@ export default function WaiterOrderPage() {
       // Submit each item in cart
       const orderPromises = cart.map((item) =>
         fetch("/api/order", {
+          credentials: "include",
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({
             sessionToken: sessionToken || selectedTable.session_token,

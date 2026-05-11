@@ -11,9 +11,8 @@ export default function ReportsPage() {
   const fetchReports = async () => {
     setLoading(true);
     try {
-      const token = localStorage.getItem('token');
       const res = await fetch(`${API_URL}/api/admin/reports?period=${period}`, {
-        headers: { Authorization: `Bearer ${token}` }
+        credentials: "include",
       });
       if (!res.ok) throw new Error('Raporlar yüklenemedi');
       const jsonData = await res.json();

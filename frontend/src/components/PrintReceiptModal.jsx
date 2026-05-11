@@ -18,16 +18,15 @@ export default function PrintReceiptModal({ session, orders, onClose }) {
     setSending(true);
     setNetworkMsg("");
     try {
-      const token = localStorage.getItem("token");
       const endpoint =
         type === "kitchen"
           ? "/api/admin/printer/order"
           : "/api/admin/printer/receipt";
       const res = await fetch(`${API_URL}${endpoint}`, {
+        credentials: "include",
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ sessionId: session.id }),
       });

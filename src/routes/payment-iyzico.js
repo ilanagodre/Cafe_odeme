@@ -326,6 +326,20 @@ router.post("/callback", async (req, res) => {
       return res.status(400).json({ error: "Geçersiz callback" });
     }
 
+    // Idempotency: skip if already finalized
+    const existing = await pool.query(
+      "SELECT status FROM payments WHERE provider_reference = $1",
+      [conversationId],
+    );
+    if (existing.rows[0]?.status === "completed") {
+      return res.send(
+        `<html><body style="text-align:center;padding:50px;font-family:sans-serif">
+          <h1 style="color:green">✓ Ödeme Zaten Tamamlandı</h1>
+          <script>window.parent.postMessage({ type: 'payment_success' }, '${process.env.FRONTEND_URL}');</script>
+        </body></html>`,
+      );
+    }
+
     getIyzico().threedsPayment.retrieve(
       { token, conversationId },
       async (err, result) => {

@@ -12,9 +12,8 @@ export default function AuditPage() {
 
   const fetchLogs = async () => {
     try {
-      const token = localStorage.getItem("token");
       const res = await fetch(`${API_URL}/api/admin/audit-logs`, {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
       });
       if (!res.ok) throw new Error("Kayıtlar yüklenemedi");
       const data = await res.json();

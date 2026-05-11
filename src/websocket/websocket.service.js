@@ -75,7 +75,8 @@ class WebSocketService {
       });
 
       // ─── Join admin updates room ─────────────────────
-      socket.on("join_admin", ({ token } = {}) => {
+      socket.on("join_admin", () => {
+        const token = socket.request.cookies?.token;
         if (!token) {
           socket.emit("error", { message: "Unauthorized" });
           return;
