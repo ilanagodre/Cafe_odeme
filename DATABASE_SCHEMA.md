@@ -27,7 +27,153 @@ docker exec -it cafe_db psql -U cafe_user -d cafe_payment
 
 ## Table Reference
 
-### 1. users
+### 1. tables
+
+**Purpose:** Store physical tables and QR codes for restaurants.
+
+**Schema:**
+
+```sql
+CREATE TABLE tables (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  table_number VARCHAR(10) NOT NULL UNIQUE,
+  qr_code VARCHAR(64) UNIQUE NOT NULL,
+  max_concurrent INT NOT NULL DEFAULT 6 CHECK (max_concurrent > 0 AND max_concurrent <= 50),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+**Columns:**
+
+| Column           | Type        | Constraints         | Description                                        |
+| ---------------- | ----------- | ------------------- | -------------------------------------------------- |
+| `id`             | UUID        | Primary Key         | Table identifier                                   |
+| `table_number`   | VARCHAR(10) | UNIQUE, NOT NULL    | Physical table number ("Masa 1", "Table 5", etc.)  |
+| `qr_code`        | VARCHAR(64) | UNIQUE, NOT NULL    | Unique QR code for this table                      |
+| `max_concurrent` | INT         | NOT NULL, DEFAULT 6 | Max simultaneous participants in self-service mode |
+| `created_at`     | TIMESTAMP   | DEFAULT NOW         | Creation time                                      |
+
+**Indexes:**
+
+```sql
+CREATE INDEX idx_tables_qr_code ON tables(qr_code);
+CREATE INDEX idx_tables_table_number ON tables(table_number);
+```
+
+**Example Queries:**
+
+```sql
+-- Get table by QR code
+SELECT * FROM tables WHERE qr_code = 'QR_TABLE_005_ABC123';
+
+-- Get all tables with active self-service sessions
+SELECT t.*, COUNT(p.id) as active_participants
+FROM tables t
+LEFT JOIN table_sessions ts ON t.id = ts.table_id AND ts.status IN ('active', 'waiting_service')
+LEFT JOIN participants p ON ts.id = p.session_id
+GROUP BY t.id;
+
+-- Check capacity for a table
+SELECT max_concurrent, (SELECT get_active_participant_count(id)) as current_count
+FROM tables WHERE id = 'table_uuid';
+```
+
+---
+
+### 2. table_sessions
+
+**Purpose:** Track active sessions at tables (both waiter and self-service modes).
+
+**Schema:**
+
+```sql
+CREATE TABLE table_sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  table_id UUID NOT NULL REFERENCES tables(id) ON DELETE CASCADE,
+  session_number INT NOT NULL DEFAULT 1,
+  session_token VARCHAR(64) UNIQUE NOT NULL,
+  session_type VARCHAR(20) NOT NULL DEFAULT 'waiter' CHECK (session_type IN ('waiter', 'self_service')),
+  status session_status_enum NOT NULL DEFAULT 'active', -- active, waiting_service, closed
+  opened_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  closed_at TIMESTAMP WITH TIME ZONE,
+  expires_at TIMESTAMP WITH TIME ZONE,
+  timeout_warned_at TIMESTAMP WITH TIME ZONE,
+  served_at TIMESTAMP WITH TIME ZONE,
+  total_bill DECIMAL(12, 2) DEFAULT 0,
+  paid_amount DECIMAL(12, 2) DEFAULT 0,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+**Columns:**
+
+| Column              | Type          | Constraints                        | Description                                               |
+| ------------------- | ------------- | ---------------------------------- | --------------------------------------------------------- |
+| `id`                | UUID          | Primary Key                        | Session identifier                                        |
+| `table_id`          | UUID          | FK (tables), NOT NULL              | Reference to table                                        |
+| `session_number`    | INT           | NOT NULL                           | Session count for this table (Masa1-#1, Masa1-#2, etc.)   |
+| `session_token`     | VARCHAR(64)   | UNIQUE, NOT NULL                   | JWT-like session token                                    |
+| `session_type`      | VARCHAR(20)   | CHECK IN ('waiter','self_service') | Type of session                                           |
+| `status`            | enum          | NOT NULL, DEFAULT 'active'         | Session status (active, waiting_service, closed)          |
+| `opened_at`         | TIMESTAMP     | DEFAULT NOW                        | When session started                                      |
+| `closed_at`         | TIMESTAMP     |                                    | When session ended                                        |
+| `expires_at`        | TIMESTAMP     |                                    | Self-service only: when session expires (NOW() + 3 hours) |
+| `timeout_warned_at` | TIMESTAMP     |                                    | Self-service only: when admin was warned about timeout    |
+| `served_at`         | TIMESTAMP     |                                    | Self-service only: when admin marked "Served"             |
+| `total_bill`        | DECIMAL(12,2) | DEFAULT 0                          | Sum of all orders                                         |
+| `paid_amount`       | DECIMAL(12,2) | DEFAULT 0                          | Sum of completed payments                                 |
+| `created_at`        | TIMESTAMP     | DEFAULT NOW                        | Creation time                                             |
+| `updated_at`        | TIMESTAMP     | DEFAULT NOW                        | Last modification time                                    |
+
+**Session Status Flow:**
+
+```
+Waiter Mode:
+  active → closed (when all paid)
+
+Self-Service Mode:
+  active → waiting_service (when all paid)
+  waiting_service → closed (when admin marks "Served")
+```
+
+**Indexes:**
+
+```sql
+CREATE INDEX idx_sessions_table_id ON table_sessions(table_id);
+CREATE INDEX idx_sessions_session_token ON table_sessions(session_token);
+CREATE INDEX idx_sessions_status_type ON table_sessions(status, session_type);
+CREATE INDEX idx_sessions_expires_at ON table_sessions(expires_at)
+  WHERE status IN ('active', 'waiting_service');
+```
+
+**Example Queries:**
+
+```sql
+-- Get active session for table
+SELECT * FROM table_sessions
+WHERE table_id = 'table_uuid' AND status = 'active'
+ORDER BY opened_at DESC LIMIT 1;
+
+-- Get all self-service sessions expiring soon (next 15 minutes)
+SELECT * FROM table_sessions
+WHERE session_type = 'self_service'
+AND status IN ('active', 'waiting_service')
+AND expires_at < NOW() + INTERVAL '15 minutes'
+AND timeout_warned_at IS NULL;
+
+-- Self-service session with participants and orders
+SELECT ts.*, COUNT(DISTINCT p.id) as participant_count, COUNT(DISTINCT o.id) as order_count
+FROM table_sessions ts
+LEFT JOIN participants p ON ts.id = p.session_id
+LEFT JOIN orders o ON ts.id = o.session_id AND o.status NOT IN ('cancelled')
+WHERE ts.id = 'session_uuid'
+GROUP BY ts.id;
+```
+
+---
+
+### 3. users
 
 **Purpose:** Store customer and staff user accounts.
 
@@ -49,17 +195,17 @@ CREATE TABLE users (
 
 **Columns:**
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | UUID | Primary Key | Unique user identifier |
-| `username` | VARCHAR(255) | UNIQUE, NOT NULL | Login username |
-| `password_hash` | VARCHAR(255) | NOT NULL | Bcrypt hashed password |
-| `email` | VARCHAR(255) | UNIQUE | Email address |
-| `full_name` | VARCHAR(255) | | User's display name |
-| `role` | VARCHAR(50) | NOT NULL | User's role (customer, waiter, head_waiter, owner) |
-| `is_active` | BOOLEAN | DEFAULT true | Soft delete flag |
-| `created_at` | TIMESTAMP | DEFAULT NOW | Account creation time |
-| `updated_at` | TIMESTAMP | DEFAULT NOW | Last modification time |
+| Column          | Type         | Constraints      | Description                                        |
+| --------------- | ------------ | ---------------- | -------------------------------------------------- |
+| `id`            | UUID         | Primary Key      | Unique user identifier                             |
+| `username`      | VARCHAR(255) | UNIQUE, NOT NULL | Login username                                     |
+| `password_hash` | VARCHAR(255) | NOT NULL         | Bcrypt hashed password                             |
+| `email`         | VARCHAR(255) | UNIQUE           | Email address                                      |
+| `full_name`     | VARCHAR(255) |                  | User's display name                                |
+| `role`          | VARCHAR(50)  | NOT NULL         | User's role (customer, waiter, head_waiter, owner) |
+| `is_active`     | BOOLEAN      | DEFAULT true     | Soft delete flag                                   |
+| `created_at`    | TIMESTAMP    | DEFAULT NOW      | Account creation time                              |
+| `updated_at`    | TIMESTAMP    | DEFAULT NOW      | Last modification time                             |
 
 **Indexes:**
 
@@ -114,19 +260,19 @@ CREATE TABLE sessions (
 
 **Columns:**
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | UUID | Primary Key | Session identifier |
-| `qr_code` | VARCHAR(255) | UNIQUE, NOT NULL | QR code value (maps to table) |
-| `table_number` | INTEGER | NOT NULL | Physical table number |
-| `session_token` | VARCHAR(255) | UNIQUE, NOT NULL | JWT token for session |
-| `is_active` | BOOLEAN | DEFAULT true | Session status (open/closed) |
-| `started_at` | TIMESTAMP | DEFAULT NOW | Session start time |
-| `closed_at` | TIMESTAMP | | Session end time |
-| `total_amount` | DECIMAL(10,2) | DEFAULT 0 | Total session amount |
-| `payment_method` | VARCHAR(50) | | Payment method used (cash, card, combined) |
-| `created_at` | TIMESTAMP | DEFAULT NOW | Creation time |
-| `updated_at` | TIMESTAMP | DEFAULT NOW | Last modification time |
+| Column           | Type          | Constraints      | Description                                |
+| ---------------- | ------------- | ---------------- | ------------------------------------------ |
+| `id`             | UUID          | Primary Key      | Session identifier                         |
+| `qr_code`        | VARCHAR(255)  | UNIQUE, NOT NULL | QR code value (maps to table)              |
+| `table_number`   | INTEGER       | NOT NULL         | Physical table number                      |
+| `session_token`  | VARCHAR(255)  | UNIQUE, NOT NULL | JWT token for session                      |
+| `is_active`      | BOOLEAN       | DEFAULT true     | Session status (open/closed)               |
+| `started_at`     | TIMESTAMP     | DEFAULT NOW      | Session start time                         |
+| `closed_at`      | TIMESTAMP     |                  | Session end time                           |
+| `total_amount`   | DECIMAL(10,2) | DEFAULT 0        | Total session amount                       |
+| `payment_method` | VARCHAR(50)   |                  | Payment method used (cash, card, combined) |
+| `created_at`     | TIMESTAMP     | DEFAULT NOW      | Creation time                              |
+| `updated_at`     | TIMESTAMP     | DEFAULT NOW      | Last modification time                     |
 
 **Indexes:**
 
@@ -188,16 +334,16 @@ CREATE TABLE participants (
 
 **Columns:**
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | UUID | Primary Key | Participant identifier |
-| `session_id` | UUID | Foreign Key, NOT NULL | Reference to session |
-| `participant_name` | VARCHAR(255) | | Person's name (for anonymous customers) |
-| `user_id` | UUID | Foreign Key | Reference to users table (nullable) |
-| `joined_at` | TIMESTAMP | DEFAULT NOW | When participant joined |
-| `is_active` | BOOLEAN | DEFAULT true | Participation status |
-| `created_at` | TIMESTAMP | DEFAULT NOW | Creation time |
-| `updated_at` | TIMESTAMP | DEFAULT NOW | Last modification time |
+| Column             | Type         | Constraints           | Description                             |
+| ------------------ | ------------ | --------------------- | --------------------------------------- |
+| `id`               | UUID         | Primary Key           | Participant identifier                  |
+| `session_id`       | UUID         | Foreign Key, NOT NULL | Reference to session                    |
+| `participant_name` | VARCHAR(255) |                       | Person's name (for anonymous customers) |
+| `user_id`          | UUID         | Foreign Key           | Reference to users table (nullable)     |
+| `joined_at`        | TIMESTAMP    | DEFAULT NOW           | When participant joined                 |
+| `is_active`        | BOOLEAN      | DEFAULT true          | Participation status                    |
+| `created_at`       | TIMESTAMP    | DEFAULT NOW           | Creation time                           |
+| `updated_at`       | TIMESTAMP    | DEFAULT NOW           | Last modification time                  |
 
 **Indexes:**
 
@@ -216,13 +362,13 @@ CREATE INDEX idx_participants_is_active ON participants(is_active);
 
 ```sql
 -- Get all participants in a session
-SELECT p.id, p.participant_name, p.user_id, p.joined_at 
-FROM participants p 
+SELECT p.id, p.participant_name, p.user_id, p.joined_at
+FROM participants p
 WHERE p.session_id = 'session_uuid' AND p.is_active = true;
 
 -- Count participants in session
-SELECT COUNT(*) as participant_count 
-FROM participants 
+SELECT COUNT(*) as participant_count
+FROM participants
 WHERE session_id = 'session_uuid' AND is_active = true;
 
 -- Sessions with their participant count
@@ -241,6 +387,7 @@ ORDER BY o.created_at DESC;
 **Participant Roles in Payment Split:**
 
 Each participant can:
+
 - Order items independently
 - View their own bill portion
 - Receive their split calculation
@@ -271,18 +418,18 @@ CREATE TABLE orders (
 
 **Columns:**
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | UUID | Primary Key | Order identifier |
-| `session_id` | UUID | Foreign Key, NOT NULL | Reference to session |
-| `participant_id` | UUID | Foreign Key, NOT NULL | Participant who ordered |
-| `menu_item_id` | UUID | Foreign Key, NOT NULL | Menu item ordered |
-| `quantity` | INTEGER | NOT NULL | Quantity ordered |
-| `unit_price` | DECIMAL(10,2) | NOT NULL | Price per unit (snapshot) |
-| `special_instructions` | TEXT | | Customer notes (no onions, extra spice, etc.) |
-| `status` | VARCHAR(50) | DEFAULT 'pending' | Order status in kitchen |
-| `created_at` | TIMESTAMP | DEFAULT NOW | Order creation time |
-| `updated_at` | TIMESTAMP | DEFAULT NOW | Last status update |
+| Column                 | Type          | Constraints           | Description                                   |
+| ---------------------- | ------------- | --------------------- | --------------------------------------------- |
+| `id`                   | UUID          | Primary Key           | Order identifier                              |
+| `session_id`           | UUID          | Foreign Key, NOT NULL | Reference to session                          |
+| `participant_id`       | UUID          | Foreign Key, NOT NULL | Participant who ordered                       |
+| `menu_item_id`         | UUID          | Foreign Key, NOT NULL | Menu item ordered                             |
+| `quantity`             | INTEGER       | NOT NULL              | Quantity ordered                              |
+| `unit_price`           | DECIMAL(10,2) | NOT NULL              | Price per unit (snapshot)                     |
+| `special_instructions` | TEXT          |                       | Customer notes (no onions, extra spice, etc.) |
+| `status`               | VARCHAR(50)   | DEFAULT varies\*      | Order status (see Order Status Values below)  |
+| `created_at`           | TIMESTAMP     | DEFAULT NOW           | Order creation time                           |
+| `updated_at`           | TIMESTAMP     | DEFAULT NOW           | Last status update                            |
 
 **Indexes:**
 
@@ -294,14 +441,35 @@ CREATE INDEX idx_orders_status ON orders(status);
 CREATE INDEX idx_orders_created_at ON orders(created_at);
 ```
 
-**Order Lifecycle:**
+**Order Status Values:**
 
-1. Customer selects item → `POST /order` → Status = `pending`
-2. Kitchen receives → Status = `confirmed`
-3. Food being made → Status = `preparing`
-4. Food ready → Status = `ready`
-5. Server delivers → Status = `served`
-6. Customer cancels → Status = `cancelled`
+| Status            | Description                             | Mode(s)      | Next Status |
+| ----------------- | --------------------------------------- | ------------ | ----------- |
+| `pending_payment` | Waiting for payment (self-service only) | self_service | pending     |
+| `pending`         | Awaiting kitchen preparation            | both         | preparing   |
+| `preparing`       | Being prepared in kitchen               | both         | ready       |
+| `ready`           | Ready for pickup/delivery               | both         | served      |
+| `served`          | Delivered to customer                   | both         | —           |
+| `cancelled`       | Order cancelled                         | both         | —           |
+
+**Order Lifecycle (Waiter Mode):**
+
+1. Garson sipariş alır → Status = `pending` (mutfağa doğru)
+2. Mutfak alır → Status = `confirmed`
+3. Pişiriliyor → Status = `preparing`
+4. Hazır → Status = `ready`
+5. Servis → Status = `served`
+6. İptal → Status = `cancelled` (cancel_reason + cancelled_at)
+
+**Order Lifecycle (Self-Service Mode):**
+
+1. Müşteri sipariş verir → Status = `pending_payment` (ödeme bekliyor)
+2. Müşteri öder → Status otomatik → `pending` (mutfağa gidiyor)
+3. Mutfak alır → Status = `confirmed`
+4. Pişiriliyor → Status = `preparing`
+5. Hazır → Status = `ready`
+6. Servis → Status = `served`
+7. Bağlantı kesilirse → Status = `cancelled` (cancel_reason = "Bağlantı kesildi")
 
 **Example Queries:**
 
@@ -363,21 +531,21 @@ CREATE TABLE menu_items (
 
 **Columns:**
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | UUID | Primary Key | Menu item identifier |
-| `name` | VARCHAR(255) | NOT NULL | Item name |
-| `description` | TEXT | | Item description |
-| `category` | VARCHAR(100) | NOT NULL | Category (coffee, food, pastry, beverage, dessert, alcohol) |
-| `price` | DECIMAL(10,2) | NOT NULL | Item price |
-| `currency` | VARCHAR(3) | DEFAULT 'TRY' | Currency code |
-| `is_available` | BOOLEAN | DEFAULT true | Availability status |
-| `preparation_time_minutes` | INTEGER | | Kitchen prep time |
-| `image_url` | VARCHAR(500) | | Item image URL |
-| `dietary_info` | VARCHAR(255) | | Dietary properties |
-| `allergens` | TEXT | | Allergen warnings |
-| `created_at` | TIMESTAMP | DEFAULT NOW | Creation time |
-| `updated_at` | TIMESTAMP | DEFAULT NOW | Last modification time |
+| Column                     | Type          | Constraints   | Description                                                 |
+| -------------------------- | ------------- | ------------- | ----------------------------------------------------------- |
+| `id`                       | UUID          | Primary Key   | Menu item identifier                                        |
+| `name`                     | VARCHAR(255)  | NOT NULL      | Item name                                                   |
+| `description`              | TEXT          |               | Item description                                            |
+| `category`                 | VARCHAR(100)  | NOT NULL      | Category (coffee, food, pastry, beverage, dessert, alcohol) |
+| `price`                    | DECIMAL(10,2) | NOT NULL      | Item price                                                  |
+| `currency`                 | VARCHAR(3)    | DEFAULT 'TRY' | Currency code                                               |
+| `is_available`             | BOOLEAN       | DEFAULT true  | Availability status                                         |
+| `preparation_time_minutes` | INTEGER       |               | Kitchen prep time                                           |
+| `image_url`                | VARCHAR(500)  |               | Item image URL                                              |
+| `dietary_info`             | VARCHAR(255)  |               | Dietary properties                                          |
+| `allergens`                | TEXT          |               | Allergen warnings                                           |
+| `created_at`               | TIMESTAMP     | DEFAULT NOW   | Creation time                                               |
+| `updated_at`               | TIMESTAMP     | DEFAULT NOW   | Last modification time                                      |
 
 **Indexes:**
 
@@ -391,21 +559,21 @@ CREATE INDEX idx_menu_items_name ON menu_items(name);
 
 ```sql
 -- Get all available items by category
-SELECT * FROM menu_items 
+SELECT * FROM menu_items
 WHERE category = 'coffee' AND is_available = true
 ORDER BY name;
 
 -- Search menu items
-SELECT * FROM menu_items 
+SELECT * FROM menu_items
 WHERE name ILIKE '%cappuccino%' AND is_available = true;
 
 -- Get items with allergens
-SELECT name, allergens FROM menu_items 
+SELECT name, allergens FROM menu_items
 WHERE allergens IS NOT NULL AND is_available = true;
 
 -- Menu for display (with image)
-SELECT id, name, description, category, price, image_url 
-FROM menu_items 
+SELECT id, name, description, category, price, image_url
+FROM menu_items
 WHERE is_available = true
 ORDER BY category, name;
 ```
@@ -436,19 +604,19 @@ CREATE TABLE payments (
 
 **Columns:**
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | UUID | Primary Key | Payment identifier |
-| `session_id` | UUID | Foreign Key, NOT NULL | Reference to session |
-| `participant_id` | UUID | Foreign Key | Participant paying (nullable for session-level payment) |
-| `amount` | DECIMAL(10,2) | NOT NULL | Payment amount |
-| `payment_method` | VARCHAR(50) | NOT NULL | Payment method (cash, card) |
-| `payment_status` | VARCHAR(50) | DEFAULT 'pending' | Status (pending, completed, failed, cancelled) |
-| `transaction_id` | VARCHAR(255) | | External payment gateway ID |
-| `reference_number` | VARCHAR(255) | | Receipt/transaction reference |
-| `notes` | TEXT | | Payment notes/memo |
-| `created_at` | TIMESTAMP | DEFAULT NOW | Payment initiation time |
-| `updated_at` | TIMESTAMP | DEFAULT NOW | Last status update |
+| Column             | Type          | Constraints           | Description                                             |
+| ------------------ | ------------- | --------------------- | ------------------------------------------------------- |
+| `id`               | UUID          | Primary Key           | Payment identifier                                      |
+| `session_id`       | UUID          | Foreign Key, NOT NULL | Reference to session                                    |
+| `participant_id`   | UUID          | Foreign Key           | Participant paying (nullable for session-level payment) |
+| `amount`           | DECIMAL(10,2) | NOT NULL              | Payment amount                                          |
+| `payment_method`   | VARCHAR(50)   | NOT NULL              | Payment method (cash, card)                             |
+| `payment_status`   | VARCHAR(50)   | DEFAULT 'pending'     | Status (pending, completed, failed, cancelled)          |
+| `transaction_id`   | VARCHAR(255)  |                       | External payment gateway ID                             |
+| `reference_number` | VARCHAR(255)  |                       | Receipt/transaction reference                           |
+| `notes`            | TEXT          |                       | Payment notes/memo                                      |
+| `created_at`       | TIMESTAMP     | DEFAULT NOW           | Payment initiation time                                 |
+| `updated_at`       | TIMESTAMP     | DEFAULT NOW           | Last status update                                      |
 
 **Indexes:**
 
@@ -463,23 +631,26 @@ CREATE INDEX idx_payments_transaction_id ON payments(transaction_id);
 **Payment Flows:**
 
 **Flow 1: Individual Payment (Split)**
+
 ```
-Participant calculates their share → 
-POST /payment/individual (participant_id + amount) → 
+Participant calculates their share →
+POST /payment/individual (participant_id + amount) →
 Payment created with participant_id
 ```
 
 **Flow 2: Session-Level Payment (All together)**
+
 ```
-Session participants total bill → 
-POST /payment/session (session_id + total_amount) → 
+Session participants total bill →
+POST /payment/session (session_id + total_amount) →
 Payment created with NULL participant_id
 ```
 
 **Flow 3: Partial Payment**
+
 ```
-Participant pays portion of their bill → 
-POST /payment/partial (participant_id + partial_amount) → 
+Participant pays portion of their bill →
+POST /payment/partial (participant_id + partial_amount) →
 Multiple payments recorded
 ```
 
@@ -505,7 +676,7 @@ WHERE p.payment_status = 'failed'
 ORDER BY p.created_at DESC;
 
 -- Daily payment summary
-SELECT 
+SELECT
   DATE(p.created_at) as payment_date,
   p.payment_method,
   COUNT(*) as transaction_count,
@@ -546,17 +717,17 @@ CREATE TABLE payment_splits (
 
 **Columns:**
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | UUID | Primary Key | Split record identifier |
-| `session_id` | UUID | Foreign Key, NOT NULL | Reference to session |
-| `participant_id` | UUID | Foreign Key, NOT NULL | Participant's share |
-| `total_session_amount` | DECIMAL(10,2) | NOT NULL | Full session total |
-| `participant_share` | DECIMAL(10,2) | NOT NULL | This participant's share |
-| `split_method` | VARCHAR(50) | NOT NULL | Method used (equal, itemized) |
-| `calculation_details` | JSONB | | Detailed calculation breakdown |
-| `created_at` | TIMESTAMP | DEFAULT NOW | Calculation time |
-| `updated_at` | TIMESTAMP | DEFAULT NOW | Last modification |
+| Column                 | Type          | Constraints           | Description                    |
+| ---------------------- | ------------- | --------------------- | ------------------------------ |
+| `id`                   | UUID          | Primary Key           | Split record identifier        |
+| `session_id`           | UUID          | Foreign Key, NOT NULL | Reference to session           |
+| `participant_id`       | UUID          | Foreign Key, NOT NULL | Participant's share            |
+| `total_session_amount` | DECIMAL(10,2) | NOT NULL              | Full session total             |
+| `participant_share`    | DECIMAL(10,2) | NOT NULL              | This participant's share       |
+| `split_method`         | VARCHAR(50)   | NOT NULL              | Method used (equal, itemized)  |
+| `calculation_details`  | JSONB         |                       | Detailed calculation breakdown |
+| `created_at`           | TIMESTAMP     | DEFAULT NOW           | Calculation time               |
+| `updated_at`           | TIMESTAMP     | DEFAULT NOW           | Last modification              |
 
 **Indexes:**
 
@@ -574,15 +745,15 @@ CREATE INDEX idx_payment_splits_participant_id ON payment_splits(participant_id)
     {
       "item_name": "Cappuccino",
       "quantity": 2,
-      "unit_price": 25.00,
-      "subtotal": 50.00
+      "unit_price": 25.0,
+      "subtotal": 50.0
     }
   ],
-  "subtotal": 50.00,
+  "subtotal": 50.0,
   "tax_rate": 0.18,
-  "tax": 9.00,
+  "tax": 9.0,
   "service_charge": 0,
-  "total": 59.00
+  "total": 59.0
 }
 ```
 
@@ -590,7 +761,7 @@ CREATE INDEX idx_payment_splits_participant_id ON payment_splits(participant_id)
 
 ```sql
 -- Get split breakdown for session
-SELECT 
+SELECT
   p.participant_name,
   ps.participant_share,
   ps.split_method,
@@ -601,7 +772,7 @@ WHERE ps.session_id = 'session_uuid'
 ORDER BY ps.participant_share DESC;
 
 -- Verify split accuracy
-SELECT 
+SELECT
   SUM(ps.participant_share) as total_from_split,
   ps.total_session_amount as actual_total
 FROM payment_splits ps
@@ -751,14 +922,16 @@ menu_items
 ### Referential Integrity
 
 **Cascade Rules:**
+
 - When session deleted → all orders, payments, participants deleted
 - When participant deleted → all their orders deleted
 - When user deleted → participant.user_id becomes NULL
 
 **Data Consistency Checks:**
+
 ```sql
 -- Ensure payment_splits total matches session total
-SELECT 
+SELECT
   ps.session_id,
   ROUND(SUM(ps.participant_share)::numeric, 2) as split_total,
   ROUND(ps.total_session_amount::numeric, 2) as session_total
@@ -786,11 +959,13 @@ WHERE s.is_active = false AND o.created_at > s.closed_at;
 **Current Implementation:** UUIDs for all primary keys
 
 **Advantages:**
+
 - Distributed generation (no sequence conflicts)
 - Better privacy (IDs aren't sequential)
 - Merging data from multiple databases easier
 
 **Generate UUID in PostgreSQL:**
+
 ```sql
 -- Automatically via DEFAULT
 DEFAULT gen_random_uuid()
@@ -804,10 +979,12 @@ SELECT gen_random_uuid();
 **Current Implementation:** DECIMAL(10, 2) for all monetary amounts
 
 **Advantages:**
+
 - Exact decimal representation (no floating-point rounding errors)
 - 10 digits total, 2 after decimal = max 99,999,999.99
 
 **Example:**
+
 ```sql
 -- Correct: 25.00 TRY
 price DECIMAL(10, 2) NOT NULL
@@ -819,13 +996,106 @@ price FLOAT NOT NULL
 ### JSONB vs VARCHAR
 
 **Used for:**
+
 - `calculation_details` in `payment_splits` (structured, searchable)
 - `old_values`/`new_values` in `audit_logs` (flexible schema)
 
 **Advantages:**
+
 - Better than TEXT for structured data
 - Fully indexed and searchable
 - Efficient storage compression
+
+---
+
+## Database Functions
+
+### get_active_participant_count(table_id)
+
+Bir masanın aktif katılımcı sayısını döndürür (hem active hem waiting_service session'larındaki).
+
+**Signature:**
+
+```sql
+CREATE FUNCTION get_active_participant_count(p_table_id UUID) RETURNS INT
+```
+
+**Usage:**
+
+```sql
+-- Check table capacity
+SELECT
+  t.table_number,
+  t.max_concurrent,
+  get_active_participant_count(t.id) as current_count,
+  get_active_participant_count(t.id) >= t.max_concurrent as is_full
+FROM tables t;
+```
+
+**Purpose:**
+
+- Self-service QR flow'da kapasite kontrolü
+- Masa dolu mu kontrolü (`capacityFull = currentCount >= maxConcurrent`)
+- Race condition'ı prevent etmek için SELECT FOR UPDATE ile birlikte kullanılır
+
+---
+
+### get_remaining_balance(session_id)
+
+Oturumun ödenmesi gereken bakiyesini hesaplar.
+
+**Signature:**
+
+```sql
+CREATE FUNCTION get_remaining_balance(p_session_id UUID) RETURNS DECIMAL
+```
+
+**Calculation:**
+
+```
+Remaining = SUM(orders.total_price) - SUM(payments.amount)
+  WHERE order.status NOT IN ('cancelled')
+  AND payment.status = 'completed'
+```
+
+**Usage:**
+
+```sql
+-- Get remaining balance for a session
+SELECT
+  ts.id,
+  get_remaining_balance(ts.id) as remaining,
+  ts.paid_amount,
+  ts.total_bill
+FROM table_sessions ts
+WHERE ts.id = 'session_uuid';
+```
+
+**Purpose:**
+
+- Admin cash payment endpoint'i otomatik hesap kapama
+- Split algorithm'larında bakiye hesapları
+- Session close time'larında doğrulama
+
+---
+
+### next_session_number(table_id)
+
+Bir masa için sonraki session numarasını döndürür (Masa1-#1, Masa1-#2, vb).
+
+**Signature:**
+
+```sql
+CREATE FUNCTION next_session_number(p_table_id UUID) RETURNS INT
+```
+
+**Usage:**
+
+```sql
+-- Get next session number when creating new session
+INSERT INTO table_sessions (table_id, session_number, ...)
+VALUES ('table_uuid', next_session_number('table_uuid'), ...);
+```
 
 ---
 
@@ -886,6 +1156,7 @@ LEFT JOIN participants p ON s.id = p.session_id;
 ### Version 1.0 (Current)
 
 Tables:
+
 - users
 - sessions
 - participants
@@ -948,19 +1219,21 @@ docker exec cafe_db psql -U cafe_user -d cafe_payment -c "SELECT COUNT(*) FROM s
 ### Query Writing
 
 1. **Always specify columns (no SELECT \*)**
+
    ```sql
    -- Good
    SELECT id, name, price FROM menu_items;
-   
+
    -- Bad
    SELECT * FROM menu_items;
    ```
 
 2. **Use indexes efficiently**
+
    ```sql
    -- Good: Uses index on created_at
    SELECT * FROM orders WHERE created_at > NOW() - INTERVAL '7 days';
-   
+
    -- Bad: Full table scan
    SELECT * FROM orders WHERE EXTRACT(MONTH FROM created_at) = 4;
    ```
@@ -981,6 +1254,7 @@ docker exec cafe_db psql -U cafe_user -d cafe_payment -c "SELECT COUNT(*) FROM s
    - Check session is active
 
 2. **Use constraints to prevent bad data**
+
    ```sql
    -- Already in place:
    ALTER TABLE orders ADD CHECK (quantity > 0);
@@ -1042,13 +1316,13 @@ Use pre-seeded test data from `database/seed.sql`:
 
 ```sql
 -- Test users
-INSERT INTO users (username, password_hash, role) VALUES 
+INSERT INTO users (username, password_hash, role) VALUES
 ('owner', '$2b$10$...hashed_password...', 'owner'),
 ('waiter1', '$2b$10$...', 'waiter'),
 ('customer', '$2b$10$...', 'customer');
 
 -- Test menu items
-INSERT INTO menu_items (name, category, price) VALUES 
+INSERT INTO menu_items (name, category, price) VALUES
 ('Cappuccino', 'coffee', 25.00),
 ('Hamburger', 'food', 45.00),
 ('Cheesecake', 'dessert', 35.00);
@@ -1073,6 +1347,7 @@ SELECT * FROM menu_items LIMIT 5;
 ---
 
 For more information, see:
+
 - [API_DOCUMENTATION.md](./API_DOCUMENTATION.md) - API endpoints
 - [INSTALLATION_GUIDE.md](./INSTALLATION_GUIDE.md) - Setup instructions
 - [DEPLOYMENT_CHECKLIST.md](./DEPLOYMENT_CHECKLIST.md) - Production deployment

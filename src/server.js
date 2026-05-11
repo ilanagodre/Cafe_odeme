@@ -17,7 +17,11 @@ const helmet = require("helmet");
 const logger = require("./config/logger");
 const { loginLimiter, apiLimiter } = require("./middleware/rateLimiting");
 const { requestLogger, errorHandler } = require("./middleware/logging");
-const { WebSocketService } = require("./websocket/websocket.service");
+const {
+  WebSocketService,
+  setInstance,
+} = require("./websocket/websocket.service");
+const { startTimeoutChecker } = require("./jobs/timeoutChecker");
 const apiRoutes = require("./routes/api");
 const { router: authRoutes } = require("./routes/auth");
 const adminRoutes = require("./routes/admin");
@@ -30,6 +34,8 @@ const server = http.createServer(app);
 // ─── Initialize WebSocket BEFORE middleware ─────────────
 const wsService = new WebSocketService(server);
 wsService.initialize();
+setInstance(wsService);
+const stopTimeoutChecker = startTimeoutChecker(wsService);
 
 // ─── Logging & Security Middleware ─────────────────────
 // Request logging
@@ -176,5 +182,6 @@ server.listen(PORT, "0.0.0.0", () => {
 // Graceful shutdown
 process.on("SIGTERM", () => {
   logger.info("[APP] SIGTERM received, shutting down...");
+  stopTimeoutChecker();
   server.close(() => process.exit(0));
 });

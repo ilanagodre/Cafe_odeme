@@ -9,13 +9,14 @@
 ## Table of Contents
 
 1. [Authentication](#authentication)
-2. [Customer Flow](#customer-flow)
-3. [Split Payment Algorithms](#split-payment-algorithms)
-4. [Staff/Admin APIs](#staffadmin-apis)
-5. [Printer APIs](#printer-apis-network-thermal-printers)
-6. [Error Handling](#error-handling)
-7. [Rate Limiting](#rate-limiting)
-8. [WebSocket Events](#websocket-events)
+2. [Customer Flow (Waiter Mode)](#customer-flow-waiter-mode)
+3. [Self-Service QR Flow](#self-service-qr-flow)
+4. [Split Payment Algorithms](#split-payment-algorithms)
+5. [Staff/Admin APIs](#staffadmin-apis)
+6. [Printer APIs](#printer-apis-network-thermal-printers)
+7. [Error Handling](#error-handling)
+8. [Rate Limiting](#rate-limiting)
+9. [WebSocket Events](#websocket-events)
 
 ---
 
@@ -97,7 +98,165 @@ Authorization: Bearer {token}
 
 ---
 
-## Customer Flow
+## Self-Service QR Flow
+
+Self-service modunda müşteriler QR kod tarayıp kendi istekleriyle session açarlar. Ödemeler tamamlandığında admin "Servis Edildi" onayı yapar.
+
+### 1. Check Table Status (Public - No Auth Required)
+
+Müşteri QR kodundan önce masa doluluk bilgisini kontrol edebilir.
+
+**Endpoint:** `GET /api/table/:qrCode/status`
+
+**Response (Success - 200):**
+
+```json
+{
+  "table": {
+    "id": "uuid",
+    "table_number": 5,
+    "max_concurrent": 6
+  },
+  "session": {
+    "id": "uuid",
+    "sessionToken": "token...",
+    "sessionType": "self_service",
+    "status": "active",
+    "participantCount": 2
+  },
+  "capacityFull": false,
+  "currentCount": 2
+}
+```
+
+**Response (Capacity Full - 409):**
+
+```json
+{
+  "error": "Masa dolu",
+  "capacityFull": true,
+  "currentCount": 6,
+  "maxConcurrent": 6
+}
+```
+
+**Notes:**
+
+- Public endpoint, authentication required
+- Returns active or waiting_service sessions
+- Capacity checked via `get_active_participant_count()` function
+- `currentCount` includes both session types
+
+---
+
+### 2. Self-Service Join (QR Scan)
+
+Müşteri QR kod tarayıp masaya katılır.
+
+**Endpoint:** `POST /api/self-service/join`
+
+**Request:**
+
+```json
+{
+  "qrCode": "TABLE_005_ABC123",
+  "participantName": "Ali"
+}
+```
+
+**Response (Success - 200):**
+
+```json
+{
+  "sessionId": "uuid",
+  "sessionToken": "sess_abc123xyz789...",
+  "participant": {
+    "id": "uuid",
+    "session_id": "uuid",
+    "name": "Ali",
+    "is_host": true,
+    "joined_at": "2026-05-12T10:30:00Z"
+  }
+}
+```
+
+**Response (Errors):**
+
+```json
+{
+  "error": "Geçersiz QR kod"
+}
+```
+
+```json
+{
+  "error": "Masa dolu",
+  "capacityFull": true,
+  "currentCount": 6,
+  "maxConcurrent": 6
+}
+```
+
+**Behavior:**
+
+- SELECT FOR UPDATE table lock → race condition yok
+- Kapasite kontrolü → `get_active_participant_count()` fonksiyonu
+- Aktif self_service session varsa katıl, yoksa yeni session aç
+- Session expires_at = NOW() + 3 hours
+- İlk katılımcı host olur (is_host = true)
+- WebSocket admin'e notification gönder (participant_joined)
+
+**Session State:**
+
+- `session_type = 'self_service'`
+- `status = 'active'`
+- `expires_at` 3 saate ayarlanır
+- `timeout_warned_at` NULL (admin 15dk önce uyarılınca set edilir)
+- `served_at` NULL (admin "Servis Edildi" onayladığında set edilir)
+
+---
+
+### 3. Self-Service Order Status
+
+Self-service session'da sipariş durumları farklı akıyor.
+
+**Order Status Flow:**
+
+```
+Müşteri sipariş verir
+    ↓
+Status = 'pending_payment' (ödeme bekliyor)
+    ↓
+Müşteri ödeme tamamlar
+    ↓
+Status = 'pending' (mutfağa gidiyor)
+    ↓
+Pişiriliyor/Servis ediliyor
+    ↓
+Status = 'served' (tamamlandı)
+```
+
+**vs. Waiter Mode:**
+
+```
+Garson sipariş alır
+    ↓
+Status = 'pending' (mutfağa gidiyor direkt)
+    ↓
+Pişiriliyor/Servis ediliyor
+    ↓
+Status = 'served'
+```
+
+**Notes:**
+
+- pending_payment → only self_service orders
+- pending → both modes
+- Payment tamamlandığında status otomatik → pending (WebSocket backend otomatik günceller)
+
+---
+
+## Customer Flow (Waiter Mode)
 
 ### 1. Join Table (QR Scan)
 
@@ -1113,6 +1272,153 @@ Authorization: Bearer {token}
 
 ---
 
+### Self-Service Session Management
+
+Self-service oturumları adminler tarafından yönetilir.
+
+#### Mark Session as Served (Self-Service Complete)
+
+Müşteri ödeme yaptı ve yemek servisi tamamlandı.
+
+**Endpoint:** `POST /admin/tables/:sessionId/mark-served`
+
+**Headers:**
+
+```
+Authorization: Bearer {token}
+```
+
+**Required Role:** `owner`, `head_waiter`
+
+**Request:**
+
+```json
+{}
+```
+
+**Response (Success - 200):**
+
+```json
+{
+  "message": "Servis tamamlandı",
+  "session": {
+    "id": "uuid",
+    "status": "closed",
+    "served_at": "2026-05-12T10:45:00Z"
+  }
+}
+```
+
+**Behavior:**
+
+- `status: 'waiting_service' → 'closed'`
+- `served_at = NOW()`
+- Audit log kaydı yazılır
+- WebSocket broadcast: `session_closed`
+- Masa yeniden müşteri kabul edebilir
+
+**When to Use:**
+
+- Müşteri ödeme tamamladı ve masa temizlenmeye hazır
+
+---
+
+#### Extend Session Timeout
+
+Self-service oturumunun süresi dolmak üzere, admin 1 saat daha uzatır.
+
+**Endpoint:** `POST /admin/tables/:sessionId/extend-timeout`
+
+**Headers:**
+
+```
+Authorization: Bearer {token}
+```
+
+**Required Role:** `owner`, `head_waiter`
+
+**Request:**
+
+```json
+{}
+```
+
+**Response (Success - 200):**
+
+```json
+{
+  "message": "Oturum 1 saat uzatıldı",
+  "newExpiresAt": "2026-05-12T11:45:00Z"
+}
+```
+
+**Behavior:**
+
+- `expires_at = NOW() + INTERVAL '1 hour'`
+- `timeout_warned_at = NULL` (uyarı sıfırlanır)
+- Audit log kaydı yazılır
+- WebSocket broadcast: `session_timeout_extended`
+
+**When to Use:**
+
+- Müşteriler hâlâ oturup yemek yiyorken süresi dolmak üzere geldi
+- Admin "+1 saat" düğmesine bastı
+
+---
+
+#### Update Table Capacity
+
+Masa maksimum eş zamanlı katılımcı sayısını güncelle.
+
+**Endpoint:** `PATCH /admin/tables/:tableId/capacity`
+
+**Headers:**
+
+```
+Authorization: Bearer {token}
+```
+
+**Required Role:** `owner`
+
+**Request:**
+
+```json
+{
+  "maxConcurrent": 8
+}
+```
+
+**Response (Success - 200):**
+
+```json
+{
+  "message": "Masa kapasitesi güncellendi",
+  "table": {
+    "id": "uuid",
+    "table_number": 5,
+    "max_concurrent": 8
+  }
+}
+```
+
+**Validation:**
+
+- `maxConcurrent` must be between 1 and 50
+- Default value: 6
+
+**Behavior:**
+
+- Database: `UPDATE tables SET max_concurrent = $1 WHERE id = $2`
+- Audit log kaydı yazılır
+- Yeni müşterilerin masaya katılması bu kapasiteye göre kontrol edilir
+
+**When to Use:**
+
+- Masa boyutunu değiştirdin (4 kişilik → 6 kişilik)
+- Kapasite ayarlarını optimize etmek istiyorsun
+
+---
+
 ## Printer APIs (Network Thermal Printers)
 
 **Supported Hardware:** Epson TM series thermal printers (ESC/POS protocol)  
@@ -1433,6 +1739,121 @@ Fired when session is closed
     "timestamp": "2026-04-19T14:40:00Z"
   }
 }
+```
+
+#### orders_cancelled
+
+Self-service session'da müşteri bağlantısı kesilince, 30 saniye sonra pending_payment siparişler iptal edilir.
+
+```json
+{
+  "type": "orders_cancelled",
+  "data": {
+    "orderIds": ["uuid1", "uuid2"],
+    "reason": "Bir katılımcının bağlantısı kesildi"
+  }
+}
+```
+
+**Behavior:**
+
+- Disconnect event gerçekleşince 30 sn grace period
+- 30 sn sonra: `status: pending_payment → cancelled`
+- `cancel_reason = "Bağlantı kesildi"`
+- Müşteri reconnect olursa timer'ı cancel et
+- Masa total_bill otomatik güncellenir
+
+---
+
+#### session_timeout_warning
+
+Self-service oturumunun süresi 15 dakika kala adminlere WebSocket uyarısı gönderilir.
+
+```json
+{
+  "type": "session_timeout_warning",
+  "data": {
+    "sessionId": "uuid",
+    "tableId": "uuid",
+    "tableNumber": 5,
+    "expiresAt": "2026-05-12T11:30:00Z",
+    "minutesRemaining": 15
+  }
+}
+```
+
+**Behavior:**
+
+- Backend: `timeoutChecker.js` job her 60 saniyede çalışır
+- WebSocket: `admin-updates` room'une broadcast edilir (admin paneli dinler)
+- Frontend toast/notification gösterir
+- Admin "+1 saat" butonuna basarsa `timeout_warned_at = NULL`
+
+---
+
+#### participant_joined
+
+Yeni katılımcı masaya katıldığında
+
+```json
+{
+  "type": "participant_joined",
+  "data": {
+    "participantId": "uuid",
+    "participantName": "Ali",
+    "isHost": true,
+    "timestamp": "2026-05-12T10:30:00Z"
+  }
+}
+```
+
+---
+
+#### participant_left
+
+Katılımcı masadan ayrıldığında
+
+```json
+{
+  "type": "participant_left",
+  "data": {
+    "participantId": "uuid",
+    "timestamp": "2026-05-12T10:45:00Z"
+  }
+}
+```
+
+---
+
+## Self-Service Session Lifecycle
+
+```
+1. QR Scan (Public API)
+   ↓
+2. GET /api/table/:qrCode/status
+   ├─ capacityFull === false → "Masaya katıl"
+   └─ capacityFull === true → "Masa dolu, bir kenara otur"
+   ↓
+3. POST /api/self-service/join
+   ├─ First participant: is_host = true
+   ├─ Others: is_host = false
+   ├─ sessionToken stored in localStorage
+   ├─ expires_at = NOW() + 3 hours
+   └─ status = 'active'
+   ↓
+4. Orders → Payment Flow
+   ├─ Place orders: status = 'pending_payment'
+   ├─ Complete payment (iyzico 3DS)
+   ├─ Order status: 'pending_payment' → 'pending'
+   └─ session status: 'active' → 'waiting_service'
+   ↓
+5. Admin Actions
+   ├─ Mark Served: 'waiting_service' → 'closed' (served_at = NOW())
+   ├─ Extend Timeout: expires_at += 1 hour (if expiring soon)
+   └─ Update Capacity: max_concurrent = X
+   ↓
+6. Session Closed
+   └─ status = 'closed'
 ```
 
 ---

@@ -51,6 +51,10 @@ class WebSocketService {
           const roomName = `table:${sessionId}`;
 
           socket.join(roomName);
+          // Reconnect sonrası pending iptal timer'ını durdur
+          if (socket.data?.disconnectTimer) {
+            clearTimeout(socket.data.disconnectTimer);
+          }
           socket.data = { sessionId, participantId };
 
           if (!this.rooms.has(sessionId)) {
@@ -107,11 +111,43 @@ class WebSocketService {
 
       // ─── Disconnect ──────────────────────────────────
       socket.on("disconnect", () => {
-        if (socket.data.sessionId) {
-          this.rooms.get(socket.data.sessionId)?.delete(socket.id);
-          socket.to(`table:${socket.data.sessionId}`).emit("participant_left", {
-            participantId: socket.data.participantId,
-          });
+        const { sessionId, participantId } = socket.data;
+        if (sessionId) {
+          this.rooms.get(sessionId)?.delete(socket.id);
+          socket
+            .to(`table:${sessionId}`)
+            .emit("participant_left", { participantId });
+
+          // 30 sn grace period — geçici kopuklukta siparişleri iptal etme
+          socket.data.disconnectTimer = setTimeout(async () => {
+            try {
+              const pool = require("../config/database");
+              const sessRes = await pool.query(
+                "SELECT session_type FROM table_sessions WHERE id = $1",
+                [sessionId],
+              );
+              if (sessRes.rows[0]?.session_type !== "self_service") return;
+
+              const cancelled = await pool.query(
+                `UPDATE orders SET status = 'cancelled', cancel_reason = 'Bağlantı kesildi', cancelled_at = NOW()
+                 WHERE session_id = $1 AND ordered_by = $2 AND status = 'pending_payment'
+                 RETURNING id`,
+                [sessionId, participantId],
+              );
+              if (cancelled.rows.length > 0) {
+                await pool.query(
+                  "UPDATE table_sessions SET total_bill = (SELECT COALESCE(SUM(total_price),0) FROM orders WHERE session_id = $1 AND status != 'cancelled') WHERE id = $1",
+                  [sessionId],
+                );
+                this.broadcast(sessionId, "orders_cancelled", {
+                  orderIds: cancelled.rows.map((r) => r.id),
+                  reason: "Bir katılımcının bağlantısı kesildi",
+                });
+              }
+            } catch (err) {
+              logger.error("[WS] Disconnect cleanup error:", err);
+            }
+          }, 30_000);
         }
       });
     });
@@ -162,4 +198,17 @@ class WebSocketService {
   }
 }
 
-module.exports = { WebSocketService };
+let instance = null;
+
+module.exports = {
+  WebSocketService,
+  setInstance: (ws) => {
+    instance = ws;
+  },
+  get instance() {
+    return instance;
+  },
+  broadcast: (sessionId, event, data) =>
+    instance?.broadcast(sessionId, event, data),
+  broadcastAdmin: (event, data) => instance?.broadcastAdmin(event, data),
+};

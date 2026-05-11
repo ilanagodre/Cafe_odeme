@@ -40,8 +40,9 @@ export default function TablePage() {
     (p) => p.id === participantId,
   );
 
-  // Check if session is closed (masa kapatıldı)
-  const isSessionClosed = sessionState?.session?.status === "closed";
+  const sessionStatus = sessionState?.session?.status;
+  const isSessionClosed = sessionStatus === "closed";
+  const isWaitingService = sessionStatus === "waiting_service";
 
   const handleAddToCart = (item) => {
     const existing = cart.find((c) => c.id === item.id);
@@ -201,10 +202,14 @@ export default function TablePage() {
             <button
               data-testid="add-order-btn"
               onClick={() => setShowMenu(!showMenu)}
-              disabled={isSessionClosed}
+              disabled={isSessionClosed || isWaitingService}
               className="text-sm bg-indigo-600 text-white px-3 py-1 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isSessionClosed ? "✕ Masa Kapandı" : "+ Sipariş Ekle"}
+              {isSessionClosed
+                ? "✕ Masa Kapandı"
+                : isWaitingService
+                  ? "⏳ Servis Bekleniyor"
+                  : "+ Sipariş Ekle"}
             </button>
           </div>
 
@@ -218,7 +223,14 @@ export default function TablePage() {
                   className="flex items-center justify-between py-2 border-b border-gray-100"
                 >
                   <div>
-                    <p className="font-medium text-gray-800">{order.name}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium text-gray-800">{order.name}</p>
+                      {order.status === "pending_payment" && (
+                        <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium">
+                          💳 Ödeme bekliyor
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-gray-500">
                       {order.quantity} × {parseFloat(order.price).toFixed(2)}₺
                     </p>
@@ -233,7 +245,7 @@ export default function TablePage() {
         </div>
 
         {/* Menu Modal */}
-        {showMenu && !isSessionClosed && (
+        {showMenu && !isSessionClosed && !isWaitingService && (
           <div
             className="fixed inset-0 bg-black/50 flex items-end z-50"
             onClick={handleCloseMenu}
@@ -458,6 +470,22 @@ export default function TablePage() {
             {remainingBalance <= 0 ? "Hesap Kapandı ✓" : "Ödemeye Git →"}
           </button>
         </div>
+
+        {isWaitingService && (
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+            <div className="flex items-start gap-3">
+              <span className="text-blue-600 text-xl">⏳</span>
+              <div>
+                <h3 className="font-medium text-blue-800 mb-1">
+                  Siparişiniz Hazırlanıyor
+                </h3>
+                <p className="text-sm text-blue-700">
+                  Ödeme alındı. Siparişiniz hazır olunca servis edilecek.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {isSessionClosed && (
           <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">

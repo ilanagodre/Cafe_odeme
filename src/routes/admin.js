@@ -555,14 +555,12 @@ router.post("/tables", requireRole("owner"), async (req, res) => {
     res.json({ table: result.rows[0] });
   } catch (err) {
     logger.error("[ERR] Add table:", err);
-    res
-      .status(500)
-      .json({
-        error:
-          process.env.NODE_ENV === "production"
-            ? "Masa eklenemedi"
-            : "Masa eklenemedi: " + err.message,
-      });
+    res.status(500).json({
+      error:
+        process.env.NODE_ENV === "production"
+          ? "Masa eklenemedi"
+          : "Masa eklenemedi: " + err.message,
+    });
   }
 });
 
@@ -751,19 +749,21 @@ router.get(
     try {
       // All tables from database with active session data
       const allTablesResult = await pool.query(`
-      SELECT t.id, t.table_number, t.qr_code,
+      SELECT t.id, t.table_number, t.qr_code, t.max_concurrent,
+             get_active_participant_count(t.id) as active_participant_count,
              COALESCE(ts.total_bill, 0) as total_bill,
              COALESCE((SELECT COUNT(*)::int FROM participants WHERE session_id = ts.id), 0) as participant_count,
              ts.id as session_id, ts.session_token
       FROM tables t
-      LEFT JOIN table_sessions ts ON t.id = ts.table_id AND ts.status = 'active'
+      LEFT JOIN table_sessions ts ON t.id = ts.table_id AND ts.status IN ('active','waiting_service')
       ORDER BY t.table_number::integer
     `);
 
-      // Active tables
+      // Active + waiting_service tables
       const active = await pool.query(`
-      SELECT t.id as table_id, t.table_number, t.qr_code,
+      SELECT t.id as table_id, t.table_number, t.qr_code, t.max_concurrent,
              ts.id as session_id, ts.session_token, ts.session_number,
+             ts.session_type, ts.status, ts.expires_at, ts.timeout_warned_at,
              ts.total_bill, ts.paid_amount, ts.opened_at,
              (SELECT get_remaining_balance(ts.id)) as remaining,
              (SELECT COUNT(*)::int FROM participants WHERE session_id = ts.id) as participant_count,
@@ -775,7 +775,7 @@ router.get(
                FROM payments p2 WHERE p2.session_id = ts.id AND p2.status = 'completed') as payments
       FROM tables t
       INNER JOIN table_sessions ts ON t.id = ts.table_id
-      WHERE ts.status = 'active'
+      WHERE ts.status IN ('active','waiting_service')
       ORDER BY t.table_number::integer
     `);
 
@@ -871,14 +871,12 @@ router.post(
       });
     } catch (err) {
       logger.error("[ERR] Cash payment:", err);
-      res
-        .status(500)
-        .json({
-          error:
-            process.env.NODE_ENV === "production"
-              ? "Ödeme işlemi başarısız"
-              : "Ödeme işlemi başarısız: " + err.message,
-        });
+      res.status(500).json({
+        error:
+          process.env.NODE_ENV === "production"
+            ? "Ödeme işlemi başarısız"
+            : "Ödeme işlemi başarısız: " + err.message,
+      });
     }
   },
 );
@@ -930,6 +928,110 @@ router.post(
     } catch (err) {
       logger.error("[ERR] Close table:", err);
       res.status(500).json({ error: "Masa kapatılamadı" });
+    }
+  },
+);
+
+// ─── MARK SESSION SERVED → CLOSED (self-service) ───────
+router.post(
+  "/tables/:sessionId/mark-served",
+  requireRole("owner", "head_waiter", "waiter"),
+  async (req, res) => {
+    const { sessionId } = req.params;
+    const userId = req.user.id;
+    try {
+      const sessionResult = await pool.query(
+        "SELECT id FROM table_sessions WHERE id = $1 AND status = 'waiting_service'",
+        [sessionId],
+      );
+      if (sessionResult.rows.length === 0) {
+        return res
+          .status(400)
+          .json({ error: "Oturum 'servis bekleniyor' durumunda değil" });
+      }
+      await pool.query(
+        "UPDATE table_sessions SET status = 'closed', closed_at = NOW(), served_at = NOW() WHERE id = $1",
+        [sessionId],
+      );
+      await pool.query(
+        "INSERT INTO audit_logs (user_id, action, entity_type, entity_id) VALUES ($1, 'session_served_and_closed', 'table_session', $2)",
+        [userId, sessionId],
+      );
+      const wsService = require("../websocket/websocket.service");
+      if (wsService?.broadcast) {
+        wsService.broadcast(sessionId, "session_closed", {
+          sessionId,
+          closedBy: userId,
+          timestamp: new Date().toISOString(),
+        });
+        wsService.broadcastAdmin("admin_session_updated", {
+          sessionId,
+          event: "session_closed",
+        });
+      }
+      res.json({ message: "Servis edildi, masa kapatıldı" });
+    } catch (err) {
+      logger.error("[ERR] Mark served:", err);
+      res.status(500).json({ error: "İşlem başarısız" });
+    }
+  },
+);
+
+// ─── EXTEND SESSION TIMEOUT ─────────────────────────────
+router.post(
+  "/tables/:sessionId/extend-timeout",
+  requireRole("owner", "head_waiter"),
+  async (req, res) => {
+    const { sessionId } = req.params;
+    const userId = req.user.id;
+    try {
+      const result = await pool.query(
+        `UPDATE table_sessions
+         SET expires_at = NOW() + INTERVAL '1 hour', timeout_warned_at = NULL
+         WHERE id = $1 AND status IN ('active','waiting_service')
+         RETURNING id`,
+        [sessionId],
+      );
+      if (result.rows.length === 0) {
+        return res.status(400).json({ error: "Oturum aktif değil" });
+      }
+      await pool.query(
+        "INSERT INTO audit_logs (user_id, action, entity_type, entity_id) VALUES ($1, 'session_timeout_extended', 'table_session', $2)",
+        [userId, sessionId],
+      );
+      const wsService = require("../websocket/websocket.service");
+      wsService?.broadcastAdmin?.("admin_session_updated", {
+        sessionId,
+        event: "timeout_extended",
+      });
+      res.json({ message: "Süre 1 saat uzatıldı" });
+    } catch (err) {
+      logger.error("[ERR] Extend timeout:", err);
+      res.status(500).json({ error: "İşlem başarısız" });
+    }
+  },
+);
+
+// ─── UPDATE TABLE CAPACITY ──────────────────────────────
+router.patch(
+  "/tables/:tableId/capacity",
+  requireRole("owner"),
+  validate("tableCapacity"),
+  async (req, res) => {
+    const { tableId } = req.params;
+    const { max_concurrent } = req.body;
+    try {
+      const result = await pool.query(
+        "UPDATE tables SET max_concurrent = $1 WHERE id = $2 RETURNING id, table_number, max_concurrent",
+        [max_concurrent, tableId],
+      );
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Masa bulunamadı" });
+      }
+      res.json({ table: result.rows[0] });
+    } catch (err) {
+      logger.error("[ERR] Update capacity:", err);
+      res.status(500).json({ error: "Kapasite güncellenemedi" });
     }
   },
 );

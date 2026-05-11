@@ -43,6 +43,7 @@ describe("Payment Endpoints", () => {
         .mockResolvedValueOnce({
           rows: [{ id: "payment-1", status: "completed", amount: 100 }],
         }) // Insert payment
+        .mockResolvedValueOnce({ rows: [] }) // Update pending_payment → pending
         .mockResolvedValueOnce({ rows: [] }) // Update paid_amount
         .mockResolvedValueOnce({ rows: [{ get_remaining_balance: "200" }] }); // Get remaining balance
 
@@ -77,10 +78,13 @@ describe("Payment Endpoints", () => {
       };
 
       mockPool.query
-        .mockResolvedValueOnce({ rows: [{ id: SESSION_ID }] }) // Find active session
+        .mockResolvedValueOnce({
+          rows: [{ id: SESSION_ID, session_type: "waiter" }],
+        }) // Find active session
         .mockResolvedValueOnce({ rows: [{ id: PARTICIPANT_ID_1 }] }) // validateParticipant
         .mockResolvedValueOnce({ rows: [{ get_remaining_balance: "300" }] }) // Get remaining balance
         .mockResolvedValueOnce({ rows: [{ id: "payment-1", amount: "300" }] }) // Insert payment
+        .mockResolvedValueOnce({ rows: [] }) // Update pending_payment → pending
         .mockResolvedValueOnce({ rows: [{ get_remaining_balance: "0" }] }) // Get new remaining balance
         .mockResolvedValueOnce({ rows: [] }); // Close session
 
@@ -98,10 +102,13 @@ describe("Payment Endpoints", () => {
       };
 
       mockPool.query
-        .mockResolvedValueOnce({ rows: [{ id: SESSION_ID }] }) // Find active session
+        .mockResolvedValueOnce({
+          rows: [{ id: SESSION_ID, session_type: "waiter" }],
+        }) // Find active session
         .mockResolvedValueOnce({ rows: [{ id: PARTICIPANT_ID_1 }] }) // validateParticipant
         .mockResolvedValueOnce({ rows: [{ get_remaining_balance: "300" }] }) // Get remaining balance
         .mockResolvedValueOnce({ rows: [{ id: "payment-1", amount: "100" }] }) // Insert payment
+        .mockResolvedValueOnce({ rows: [] }) // Update pending_payment → pending
         .mockResolvedValueOnce({ rows: [{ get_remaining_balance: "200" }] }); // Get new remaining balance
 
       const res = await request(app).post("/api/payment/full").send(payload);
@@ -118,7 +125,9 @@ describe("Payment Endpoints", () => {
       };
 
       mockPool.query
-        .mockResolvedValueOnce({ rows: [{ id: SESSION_ID }] }) // Find active session
+        .mockResolvedValueOnce({
+          rows: [{ id: SESSION_ID, session_type: "waiter" }],
+        }) // Find active session
         .mockResolvedValueOnce({ rows: [{ id: PARTICIPANT_ID_1 }] }) // validateParticipant
         .mockResolvedValueOnce({ rows: [{ get_remaining_balance: "0" }] }); // Get remaining balance (already paid)
 
@@ -144,6 +153,7 @@ describe("Payment Endpoints", () => {
         .mockResolvedValueOnce({ rows: [{ id: PARTICIPANT_ID_1 }] }) // validateParticipant (paidBy)
         .mockResolvedValueOnce({ rows: [{ name: "Aylin" }] }) // Get target participant
         .mockResolvedValueOnce({ rows: [{ id: "payment-1", amount: 100 }] }) // Insert payment
+        .mockResolvedValueOnce({ rows: [] }) // Update pending_payment → pending
         .mockResolvedValueOnce({ rows: [] }) // Update paid_amount
         .mockResolvedValueOnce({ rows: [{ get_remaining_balance: "200" }] }); // Get remaining balance
 

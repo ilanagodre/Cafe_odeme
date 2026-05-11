@@ -17,6 +17,7 @@ services:
       - ./database/migration_cash_payment.sql:/docker-entrypoint-initdb.d/06-migration-cash-payment.sql
       - ./database/migration_iyzico_modes.sql:/docker-entrypoint-initdb.d/07-migration-iyzico-modes.sql
       - ./database/migration_categories.sql:/docker-entrypoint-initdb.d/08-migration-categories.sql
+      - ./database/migration_self_service.sql:/docker-entrypoint-initdb.d/09-migration-self-service.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U cafe_user -d cafe_payment"]
       interval: 5s

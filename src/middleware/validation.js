@@ -82,6 +82,15 @@ const schemas = {
   adminAddParticipant: joi.object({
     participantName: joi.string().min(1).max(100).required(),
   }),
+
+  selfServiceJoin: joi.object({
+    qrCode: joi.string().max(255).required(),
+    participantName: joi.string().min(1).max(100).required(),
+  }),
+
+  tableCapacity: joi.object({
+    max_concurrent: joi.number().integer().min(1).max(50).required(),
+  }),
 };
 
 // ─── Validation Middleware ────────────────────────────

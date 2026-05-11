@@ -108,6 +108,17 @@ export function useTableSession(sessionToken, participantId) {
       });
     });
 
+    socketInstance.on("orders_cancelled", (data) => {
+      setSessionState((prev) => {
+        if (!prev || !prev.orders) return prev;
+        const cancelledIds = new Set(data.orderIds || []);
+        return {
+          ...prev,
+          orders: prev.orders.filter((o) => !cancelledIds.has(o.id)),
+        };
+      });
+    });
+
     socketInstance.on("participant_joined", () => {
       // Could show a toast
     });

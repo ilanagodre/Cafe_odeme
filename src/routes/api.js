@@ -18,6 +18,162 @@ async function validateParticipant(sessionId, participantId) {
   return result.rows.length > 0;
 }
 
+// ─── QR STATUS (public — no auth) ─────────────────────
+// Masa doluluk ve aktif session bilgisi döndürür
+router.get("/table/:qrCode/status", async (req, res) => {
+  const { qrCode } = req.params;
+  try {
+    const tableResult = await pool.query(
+      "SELECT id, table_number, max_concurrent FROM tables WHERE qr_code = $1",
+      [qrCode],
+    );
+    if (tableResult.rows.length === 0) {
+      return res.status(404).json({ error: "Geçersiz QR kod" });
+    }
+    const table = tableResult.rows[0];
+
+    const sessionResult = await pool.query(
+      `SELECT id, session_token, session_type, status,
+              (SELECT COUNT(*) FROM participants WHERE session_id = ts.id) AS participant_count
+       FROM table_sessions ts
+       WHERE table_id = $1 AND status IN ('active','waiting_service') AND session_type = 'self_service'
+       ORDER BY opened_at DESC LIMIT 1`,
+      [table.id],
+    );
+
+    const activeCount = parseInt(
+      (await pool.query("SELECT get_active_participant_count($1)", [table.id]))
+        .rows[0].get_active_participant_count,
+    );
+
+    const session = sessionResult.rows[0] || null;
+    res.json({
+      table: {
+        id: table.id,
+        table_number: table.table_number,
+        max_concurrent: table.max_concurrent,
+      },
+      session: session
+        ? {
+            id: session.id,
+            sessionToken: session.session_token,
+            sessionType: session.session_type,
+            status: session.status,
+            participantCount: parseInt(session.participant_count),
+          }
+        : null,
+      capacityFull: activeCount >= table.max_concurrent,
+      currentCount: activeCount,
+    });
+  } catch (err) {
+    logger.error("[ERR] Table status:", err);
+    res.status(500).json({ error: "Masa durumu alınamadı" });
+  }
+});
+
+// ─── SELF-SERVICE JOIN ────────────────────────────────
+// Müşteri QR tarayınca self-service session açar veya katılır
+router.post(
+  "/self-service/join",
+  validate("selfServiceJoin"),
+  async (req, res) => {
+    const { qrCode, participantName } = req.body;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Masa kilitle (yarış koruması)
+      const tableResult = await client.query(
+        "SELECT id, table_number, max_concurrent FROM tables WHERE qr_code = $1 FOR UPDATE",
+        [qrCode],
+      );
+      if (tableResult.rows.length === 0) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ error: "Geçersiz QR kod" });
+      }
+      const table = tableResult.rows[0];
+
+      // Kapasite kontrolü
+      const countResult = await client.query(
+        "SELECT get_active_participant_count($1) AS cnt",
+        [table.id],
+      );
+      const activeCount = parseInt(countResult.rows[0].cnt);
+      if (activeCount >= table.max_concurrent) {
+        await client.query("ROLLBACK");
+        return res.status(409).json({
+          error: "Masa dolu",
+          capacityFull: true,
+          currentCount: activeCount,
+          maxConcurrent: table.max_concurrent,
+        });
+      }
+
+      // Aktif self-service session var mı?
+      let sessionResult = await client.query(
+        "SELECT id, session_token FROM table_sessions WHERE table_id = $1 AND status = 'active' AND session_type = 'self_service'",
+        [table.id],
+      );
+
+      let sessionId, sessionToken;
+      if (sessionResult.rows.length > 0) {
+        sessionId = sessionResult.rows[0].id;
+        sessionToken = sessionResult.rows[0].session_token;
+      } else {
+        const maxNum = await client.query(
+          "SELECT COALESCE(MAX(session_number), 0) AS max_num FROM table_sessions WHERE table_id = $1",
+          [table.id],
+        );
+        const nextNum = maxNum.rows[0].max_num + 1;
+        const newSession = await client.query(
+          `INSERT INTO table_sessions (table_id, session_number, session_type, expires_at)
+         VALUES ($1, $2, 'self_service', NOW() + INTERVAL '3 hours')
+         RETURNING id, session_token`,
+          [table.id, nextNum],
+        );
+        sessionId = newSession.rows[0].id;
+        sessionToken = newSession.rows[0].session_token;
+      }
+
+      // İlk katılımcı mı?
+      const participantCount = await client.query(
+        "SELECT COUNT(*) FROM participants WHERE session_id = $1",
+        [sessionId],
+      );
+      const isHost = participantCount.rows[0].count === "0";
+
+      const participant = await client.query(
+        "INSERT INTO participants (session_id, name, is_host) VALUES ($1, $2, $3) RETURNING *",
+        [sessionId, participantName, isHost],
+      );
+
+      await client.query("COMMIT");
+
+      // WebSocket bildirimi (hata olsa da devam et)
+      try {
+        const ws = require("../websocket/websocket.service");
+        ws.broadcastAdmin("admin_session_updated", {
+          sessionId,
+          tableId: table.id,
+          event: "participant_joined",
+        });
+      } catch (_) {}
+
+      res.json({
+        sessionId,
+        sessionToken,
+        participant: participant.rows[0],
+      });
+    } catch (err) {
+      await client.query("ROLLBACK");
+      logger.error("[ERR] Self-service join:", err);
+      res.status(500).json({ error: "Masaya katılamadı" });
+    } finally {
+      client.release();
+    }
+  },
+);
+
 // ─── JOIN TABLE (QR Scan) ─────────────────────────────
 // When customer scans QR code, create/join session
 router.post("/session/join", validate("sessionJoin"), async (req, res) => {
@@ -142,24 +298,33 @@ router.post("/order", validate("placeOrder"), async (req, res) => {
 
   try {
     const sessionResult = await pool.query(
-      "SELECT id FROM table_sessions WHERE session_token = $1 AND status = $2",
-      [sessionToken, "active"],
+      "SELECT id, session_type FROM table_sessions WHERE session_token = $1 AND status = 'active'",
+      [sessionToken],
     );
 
     if (sessionResult.rows.length === 0) {
       return res.status(404).json({ error: "Active session not found" });
     }
 
-    const sessionId = sessionResult.rows[0].id;
+    const { id: sessionId, session_type } = sessionResult.rows[0];
+    const initialStatus =
+      session_type === "self_service" ? "pending_payment" : "pending";
     const totalPrice = (quantity * price).toFixed(2);
 
     const order = await pool.query(
-      `INSERT INTO orders (session_id, name, quantity, price, total_price, ordered_by) 
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [sessionId, itemName, quantity, price, totalPrice, orderedBy],
+      `INSERT INTO orders (session_id, name, quantity, price, total_price, ordered_by, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [
+        sessionId,
+        itemName,
+        quantity,
+        price,
+        totalPrice,
+        orderedBy,
+        initialStatus,
+      ],
     );
 
-    // Update session total_bill
     await pool.query(
       "UPDATE table_sessions SET total_bill = (SELECT COALESCE(SUM(total_price), 0) FROM orders WHERE session_id = $1 AND status != 'cancelled') WHERE id = $2",
       [sessionId, sessionId],
@@ -249,6 +414,10 @@ router.post("/payment", validate("payment"), async (req, res) => {
       [sessionId, participantId, amount, paymentType || "full"],
     );
     await client.query(
+      "UPDATE orders SET status = 'pending' WHERE session_id = $1 AND ordered_by = $2 AND status = 'pending_payment'",
+      [sessionId, participantId],
+    );
+    await client.query(
       "UPDATE table_sessions SET paid_amount = (SELECT SUM(amount) FROM payments WHERE session_id = $1 AND status = $2) WHERE id = $3",
       [sessionId, "completed", sessionId],
     );
@@ -278,14 +447,14 @@ router.post("/payment/full", validate("paymentFull"), async (req, res) => {
   try {
     await client.query("BEGIN");
     const sessionResult = await client.query(
-      "SELECT id FROM table_sessions WHERE session_token = $1 AND status = $2 FOR UPDATE",
+      "SELECT id, session_type FROM table_sessions WHERE session_token = $1 AND status = $2 FOR UPDATE",
       [sessionToken, "active"],
     );
     if (sessionResult.rows.length === 0) {
       await client.query("ROLLBACK");
       return res.status(404).json({ error: "Active session not found" });
     }
-    const sessionId = sessionResult.rows[0].id;
+    const { id: sessionId, session_type } = sessionResult.rows[0];
     const pCheck = await client.query(
       "SELECT id FROM participants WHERE id = $1 AND session_id = $2",
       [paidBy, sessionId],
@@ -311,14 +480,22 @@ router.post("/payment/full", validate("paymentFull"), async (req, res) => {
        VALUES ($1, $2, $3, 'full', 'completed', NOW()) RETURNING *`,
       [sessionId, paidBy, remainingBalance],
     );
+    // pending_payment → pending (ödeme onaylandı)
+    await client.query(
+      "UPDATE orders SET status = 'pending' WHERE session_id = $1 AND status = 'pending_payment'",
+      [sessionId],
+    );
     const newBalance = parseFloat(
       (await client.query("SELECT get_remaining_balance($1)", [sessionId]))
         .rows[0].get_remaining_balance,
     );
     if (newBalance <= 0) {
+      // self_service: waiting_service (servis bekleniyor), waiter: direkt kapalı
+      const newStatus =
+        session_type === "self_service" ? "waiting_service" : "closed";
       await client.query(
-        "UPDATE table_sessions SET status = 'closed', closed_at = NOW() WHERE id = $1",
-        [sessionId],
+        `UPDATE table_sessions SET status = $1, closed_at = CASE WHEN $1 = 'closed' THEN NOW() ELSE NULL END WHERE id = $2`,
+        [newStatus, sessionId],
       );
     }
     await client.query("COMMIT");
@@ -372,6 +549,11 @@ router.post("/payment/for", validate("paymentFor"), async (req, res) => {
       `INSERT INTO payments (session_id, participant_id, amount, payment_type, status, completed_at)
        VALUES ($1, $2, $3, 'full', 'completed', NOW()) RETURNING *`,
       [sessionId, paidBy, amount],
+    );
+    // Ödeyenin pending_payment siparişlerini onayla
+    await client.query(
+      "UPDATE orders SET status = 'pending' WHERE session_id = $1 AND ordered_by = $2 AND status = 'pending_payment'",
+      [sessionId, paidBy],
     );
     await client.query(
       "UPDATE table_sessions SET paid_amount = (SELECT SUM(amount) FROM payments WHERE session_id = $1 AND status = $2) WHERE id = $3",
@@ -440,7 +622,7 @@ router.post("/payment/item", validate("paymentItem"), async (req, res) => {
     );
     const orderPlaceholders = orderIds.map((_, i) => `$${i + 2}`).join(",");
     await client.query(
-      `UPDATE orders SET paid_by = $1 WHERE id IN (${orderPlaceholders})`,
+      `UPDATE orders SET paid_by = $1, status = CASE WHEN status = 'pending_payment' THEN 'pending'::order_status_enum ELSE status END WHERE id IN (${orderPlaceholders})`,
       [paidBy, ...orderIds],
     );
     await client.query(

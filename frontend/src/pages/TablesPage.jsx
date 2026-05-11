@@ -24,6 +24,8 @@ export default function TablesPage() {
   const [printSession, setPrintSession] = useState(null);
   const [historyPage, setHistoryPage] = useState(1);
   const HISTORY_PAGE_SIZE = 10;
+  const [servingSession, setServingSession] = useState(false);
+  const [timeoutWarnings, setTimeoutWarnings] = useState([]);
 
   const user = JSON.parse(localStorage.getItem("user") || "{}");
   const canClose = ["owner", "head_waiter"].includes(user.role);
@@ -54,6 +56,21 @@ export default function TablesPage() {
       withCredentials: true,
     });
     socket.on("connect", () => socket.emit("join_admin"));
+
+    socket.on("session_timeout_warning", (data) => {
+      setTimeoutWarnings((prev) =>
+        prev.find((w) => w.sessionId === data.sessionId)
+          ? prev
+          : [
+              ...prev,
+              {
+                sessionId: data.sessionId,
+                tableNumber: data.tableNumber,
+                expiresAt: data.expiresAt,
+              },
+            ],
+      );
+    });
 
     socket.on(
       "admin_order_updated",
@@ -246,6 +263,12 @@ export default function TablesPage() {
         },
       );
       if (!res.ok) throw new Error("Güncellenemedi");
+      if (editTable.max_concurrent !== undefined) {
+        await handleUpdateCapacity(
+          editTable.table_id,
+          editTable.max_concurrent,
+        );
+      }
       setEditTable(null);
       fetchData();
     } catch (err) {
@@ -265,6 +288,50 @@ export default function TablesPage() {
     } catch (err) {
       alert(err.message);
     }
+  };
+
+  const handleMarkServed = async (sessionId) => {
+    if (!canClose) return;
+    setServingSession(true);
+    try {
+      const res = await fetch(
+        `${API_URL}/api/admin/tables/${sessionId}/mark-served`,
+        { credentials: "include", method: "POST" },
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setSelectedTable(null);
+      fetchData();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setServingSession(false);
+    }
+  };
+
+  const handleExtendTimeout = async (sessionId) => {
+    try {
+      const res = await fetch(
+        `${API_URL}/api/admin/tables/${sessionId}/extend-timeout`,
+        { credentials: "include", method: "POST" },
+      );
+      if (!res.ok) throw new Error("Uzatılamadı");
+      setTimeoutWarnings((prev) =>
+        prev.filter((w) => w.sessionId !== sessionId),
+      );
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const handleUpdateCapacity = async (tableId, maxConcurrent) => {
+    if (!isOwner) return;
+    await fetch(`${API_URL}/api/admin/tables/${tableId}/capacity`, {
+      credentials: "include",
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ max_concurrent: Number(maxConcurrent) }),
+    });
   };
 
   if (loading) return <div className="p-8">Yükleniyor...</div>;
@@ -307,9 +374,11 @@ export default function TablesPage() {
               <div
                 key={table.id}
                 className={`bg-white rounded-xl p-5 shadow-sm border-2 text-left relative ${
-                  activeTable
-                    ? "border-transparent"
-                    : "border-dashed border-gray-300"
+                  activeTable?.status === "waiting_service"
+                    ? "border-orange-400"
+                    : activeTable
+                      ? "border-transparent"
+                      : "border-dashed border-gray-300"
                 }`}
               >
                 {isOwner && (
@@ -323,6 +392,7 @@ export default function TablesPage() {
                           table_id: table.id,
                           table_number: table.table_number,
                           qr_code: table.qr_code,
+                          max_concurrent: table.max_concurrent ?? 6,
                         })
                       }
                       className="p-1 bg-gray-100 rounded hover:bg-gray-200 text-xs"
@@ -352,9 +422,21 @@ export default function TablesPage() {
                   >
                     Masa {table.table_number}
                   </span>
-                  <div
-                    className={`w-3 h-3 rounded-full ${activeTable ? "bg-green-500" : "bg-gray-300"}`}
-                  />
+                  <div className="flex items-center gap-1.5">
+                    {activeTable?.status === "waiting_service" && (
+                      <span className="text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded font-medium">
+                        Servis
+                      </span>
+                    )}
+                    {activeTable?.session_type === "self_service" && (
+                      <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-medium">
+                        Self
+                      </span>
+                    )}
+                    <div
+                      className={`w-3 h-3 rounded-full ${activeTable?.status === "waiting_service" ? "bg-orange-400" : activeTable ? "bg-green-500" : "bg-gray-300"}`}
+                    />
+                  </div>
                 </div>
                 {activeTable ? (
                   <div
@@ -365,6 +447,9 @@ export default function TablesPage() {
                       <span className="text-gray-500">Kişi:</span>
                       <span className="font-medium">
                         {activeTable.participant_count}
+                        {table.max_concurrent
+                          ? ` / ${table.max_concurrent}`
+                          : ""}
                       </span>
                     </div>
                     <div className="flex justify-between">
@@ -502,9 +587,21 @@ export default function TablesPage() {
           >
             <div className="p-6 border-b flex items-center justify-between">
               <div>
-                <h2 className="text-xl font-bold text-gray-800">
-                  Masa {selectedTable.table_number}
-                </h2>
+                <div className="flex items-center gap-2 mb-1">
+                  <h2 className="text-xl font-bold text-gray-800">
+                    Masa {selectedTable.table_number}
+                  </h2>
+                  {selectedTable.session_type === "self_service" && (
+                    <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">
+                      Self-Servis
+                    </span>
+                  )}
+                  {selectedTable.status === "waiting_service" && (
+                    <span className="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-medium">
+                      ⏳ Servis Bekliyor
+                    </span>
+                  )}
+                </div>
                 <p className="text-sm text-gray-500">
                   Oturum #{selectedTable.session_number} •{" "}
                   {new Date(selectedTable.opened_at).toLocaleTimeString(
@@ -657,47 +754,65 @@ export default function TablesPage() {
                   </span>
                 </div>
 
-                {canClose && parseFloat(selectedTable.remaining || 0) > 0 && (
+                {canClose &&
+                  parseFloat(selectedTable.remaining || 0) > 0 &&
+                  selectedTable.status !== "waiting_service" && (
+                    <button
+                      onClick={() => setShowCashPaymentModal(true)}
+                      className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700"
+                    >
+                      💵 Hesap Al (
+                      {parseFloat(selectedTable.remaining || 0).toFixed(2)}₺)
+                    </button>
+                  )}
+
+                {canClose && selectedTable.status === "waiting_service" && (
                   <button
-                    onClick={() => setShowCashPaymentModal(true)}
-                    className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700"
+                    onClick={() => handleMarkServed(selectedTable.session_id)}
+                    disabled={servingSession}
+                    className="w-full bg-orange-500 text-white py-3 rounded-xl font-semibold hover:bg-orange-600 disabled:opacity-50"
                   >
-                    💵 Hesap Al (
-                    {parseFloat(selectedTable.remaining || 0).toFixed(2)}₺)
+                    {servingSession
+                      ? "İşleniyor..."
+                      : "✓ Servis Edildi → Masayı Kapat"}
                   </button>
                 )}
 
-                {canClose && parseFloat(selectedTable.remaining || 0) === 0 && (
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => handleCloseTable(selectedTable.session_id)}
-                      disabled={closing}
-                      className="flex-1 bg-green-600 text-white py-3 rounded-xl font-semibold hover:bg-green-700 disabled:opacity-50"
-                    >
-                      {closing ? "Kapatılıyor..." : "✓ Masayı Kapat"}
-                    </button>
-                    <button
-                      onClick={() => {
-                        setPrintSession({
-                          session: {
-                            id: selectedTable.session_id,
-                            table_number: selectedTable.table_number,
-                            total_bill: selectedTable.total_bill,
-                            paid_amount: selectedTable.total_bill,
-                          },
-                          orders: (selectedTable.orders || []).filter(
-                            (o) => o.status !== "cancelled",
-                          ),
-                        });
-                        setShowPrintModal(true);
-                      }}
-                      className="px-4 py-3 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200"
-                      title="Fiş Yazdır"
-                    >
-                      🖨️
-                    </button>
-                  </div>
-                )}
+                {canClose &&
+                  parseFloat(selectedTable.remaining || 0) === 0 &&
+                  selectedTable.status !== "waiting_service" && (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() =>
+                          handleCloseTable(selectedTable.session_id)
+                        }
+                        disabled={closing}
+                        className="flex-1 bg-green-600 text-white py-3 rounded-xl font-semibold hover:bg-green-700 disabled:opacity-50"
+                      >
+                        {closing ? "Kapatılıyor..." : "✓ Masayı Kapat"}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setPrintSession({
+                            session: {
+                              id: selectedTable.session_id,
+                              table_number: selectedTable.table_number,
+                              total_bill: selectedTable.total_bill,
+                              paid_amount: selectedTable.total_bill,
+                            },
+                            orders: (selectedTable.orders || []).filter(
+                              (o) => o.status !== "cancelled",
+                            ),
+                          });
+                          setShowPrintModal(true);
+                        }}
+                        className="px-4 py-3 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200"
+                        title="Fiş Yazdır"
+                      >
+                        🖨️
+                      </button>
+                    </div>
+                  )}
               </div>
             </div>
           </div>
@@ -930,6 +1045,24 @@ export default function TablesPage() {
                   className="w-full px-4 py-3 rounded-lg border border-gray-300"
                 />
               </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Maks. Eş Zamanlı Kişi
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={editTable.max_concurrent ?? 6}
+                  onChange={(e) =>
+                    setEditTable({
+                      ...editTable,
+                      max_concurrent: Number(e.target.value),
+                    })
+                  }
+                  className="w-full px-4 py-3 rounded-lg border border-gray-300"
+                />
+              </div>
             </div>
             <div className="flex gap-3 mt-6">
               <button
@@ -1007,6 +1140,52 @@ export default function TablesPage() {
             setPrintSession(null);
           }}
         />
+      )}
+
+      {/* Timeout Warning Toasts */}
+      {timeoutWarnings.length > 0 && (
+        <div className="fixed bottom-6 right-6 z-50 space-y-3 max-w-sm">
+          {timeoutWarnings.map((w) => (
+            <div
+              key={w.sessionId}
+              className="bg-yellow-50 border border-yellow-300 rounded-xl p-4 shadow-lg"
+            >
+              <div className="flex items-start gap-3 mb-3">
+                <span className="text-yellow-600 text-xl">⏰</span>
+                <div>
+                  <p className="font-semibold text-yellow-800">
+                    Masa {w.tableNumber} — Süre Doluyor
+                  </p>
+                  <p className="text-xs text-yellow-600">
+                    {new Date(w.expiresAt).toLocaleTimeString("tr-TR", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}{" "}
+                    'de sona eriyor
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleExtendTimeout(w.sessionId)}
+                  className="flex-1 py-2 bg-yellow-500 text-white rounded-lg text-sm font-medium hover:bg-yellow-600"
+                >
+                  +1 Saat Uzat
+                </button>
+                <button
+                  onClick={() =>
+                    setTimeoutWarnings((prev) =>
+                      prev.filter((x) => x.sessionId !== w.sessionId),
+                    )
+                  }
+                  className="px-3 py-2 bg-gray-100 text-gray-600 rounded-lg text-sm hover:bg-gray-200"
+                >
+                  Kapat
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
