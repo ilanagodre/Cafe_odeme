@@ -1,16 +1,20 @@
-import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { useTableSession } from '../hooks/useTableSession';
+import { useState, useEffect } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { useTableSession } from "../hooks/useTableSession";
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
 
 export default function TablePage() {
   const { sessionToken, participantId } = useParams();
   const navigate = useNavigate();
-  const { sessionState, isConnected, error } = useTableSession(sessionToken, participantId);
+  const { sessionState, isConnected, error } = useTableSession(
+    sessionToken,
+    participantId,
+  );
   const [showMenu, setShowMenu] = useState(false);
-  const [orderError, setOrderError] = useState('');
+  const [orderError, setOrderError] = useState("");
   const [menuItems, setMenuItems] = useState([]);
+  const [menuCategoryFilter, setMenuCategoryFilter] = useState("all");
   const [cart, setCart] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [orderSuccess, setOrderSuccess] = useState(false);
@@ -22,76 +26,93 @@ export default function TablePage() {
         const res = await fetch(`${API_URL}/api/admin/menu`);
         if (res.ok) {
           const data = await res.json();
-          setMenuItems(data.items?.filter(i => i.is_available) || []);
+          setMenuItems(data.items?.filter((i) => i.is_available) || []);
         }
       } catch (err) {
-        console.error('Menu fetch error:', err);
+        console.error("Menu fetch error:", err);
       }
     };
     fetchMenu();
   }, []);
 
   // Get current participant
-  const currentParticipant = sessionState?.participants.find(p => p.id === participantId);
+  const currentParticipant = sessionState?.participants.find(
+    (p) => p.id === participantId,
+  );
 
   // Check if session is closed (masa kapatıldı)
-  const isSessionClosed = sessionState?.session?.status === 'closed';
+  const isSessionClosed = sessionState?.session?.status === "closed";
 
   const handleAddToCart = (item) => {
-    const existing = cart.find(c => c.id === item.id);
+    const existing = cart.find((c) => c.id === item.id);
     if (existing) {
-      setCart(cart.map(c =>
-        c.id === item.id ? { ...c, quantity: c.quantity + 1 } : c
-      ));
+      setCart(
+        cart.map((c) =>
+          c.id === item.id ? { ...c, quantity: c.quantity + 1 } : c,
+        ),
+      );
     } else {
-      setCart([...cart, { id: item.id, name: item.name, price: item.price, quantity: 1 }]);
+      setCart([
+        ...cart,
+        { id: item.id, name: item.name, price: item.price, quantity: 1 },
+      ]);
     }
   };
 
   const handleUpdateQuantity = (itemId, delta) => {
-    setCart(cart
-      .map(c => c.id === itemId ? { ...c, quantity: Math.max(0, c.quantity + delta) } : c)
-      .filter(c => c.quantity > 0)
+    setCart(
+      cart
+        .map((c) =>
+          c.id === itemId
+            ? { ...c, quantity: Math.max(0, c.quantity + delta) }
+            : c,
+        )
+        .filter((c) => c.quantity > 0),
     );
   };
 
   const handleRemoveFromCart = (itemId) => {
-    setCart(cart.filter(c => c.id !== itemId));
+    setCart(cart.filter((c) => c.id !== itemId));
   };
 
   const handleSubmitOrder = async () => {
     if (cart.length === 0) return;
     setSubmitting(true);
-    setOrderError('');
+    setOrderError("");
     try {
-      const responses = await Promise.all(cart.map(item =>
-        fetch(`${API_URL}/api/order`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sessionToken,
-            itemName: item.name,
-            quantity: item.quantity,
-            price: item.price,
-            orderedBy: participantId
-          })
-        })
-      ));
+      const responses = await Promise.all(
+        cart.map((item) =>
+          fetch(`${API_URL}/api/order`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              sessionToken,
+              itemName: item.name,
+              quantity: item.quantity,
+              price: item.price,
+              orderedBy: participantId,
+            }),
+          }),
+        ),
+      );
 
       for (const res of responses) {
         if (!res.ok) {
           const data = await res.json();
-          setOrderError(data.error || 'Sipariş başarısız');
+          setOrderError(data.error || "Sipariş başarısız");
           return;
         }
       }
 
       setCart([]);
       setOrderSuccess(true);
-      setTimeout(() => { setShowMenu(false); setOrderSuccess(false); }, 1500);
+      setTimeout(() => {
+        setShowMenu(false);
+        setOrderSuccess(false);
+      }, 1500);
     } catch (err) {
-      console.error('Order failed:', err);
-      setOrderError('Sipariş gönderilemedi');
+      console.error("Order failed:", err);
+      setOrderError("Sipariş gönderilemedi");
     } finally {
       setSubmitting(false);
     }
@@ -100,12 +121,19 @@ export default function TablePage() {
   const handleCloseMenu = () => {
     setShowMenu(false);
     setCart([]);
-    setOrderError('');
+    setOrderError("");
   };
 
-  const cartTotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  const cartTotal = cart.reduce(
+    (sum, item) => sum + item.price * item.quantity,
+    0,
+  );
 
-  const totalOrders = sessionState?.orders?.reduce((sum, o) => sum + parseFloat(o.total_price), 0) || 0;
+  const totalOrders =
+    sessionState?.orders?.reduce(
+      (sum, o) => sum + parseFloat(o.total_price),
+      0,
+    ) || 0;
   const remainingBalance = sessionState?.remainingBalance || 0;
 
   return (
@@ -115,18 +143,27 @@ export default function TablePage() {
         <div className="max-w-lg mx-auto px-4 py-4 flex items-center justify-between">
           <div>
             <h1 className="text-lg font-bold text-gray-800">
-              {currentParticipant ? `${currentParticipant.name}'nin Masası` : 'Masa'}
+              {currentParticipant
+                ? `${currentParticipant.name}'nin Masası`
+                : "Masa"}
             </h1>
-            <div data-testid="connection-status" className="flex items-center gap-2 mt-1">
-              <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+            <div
+              data-testid="connection-status"
+              className="flex items-center gap-2 mt-1"
+            >
+              <div
+                className={`w-2 h-2 rounded-full ${isConnected ? "bg-green-500" : "bg-red-500"}`}
+              />
               <span className="text-xs text-gray-500">
-                {isConnected ? 'Canlı' : 'Bağlanıyor...'}
+                {isConnected ? "Canlı" : "Bağlanıyor..."}
               </span>
             </div>
           </div>
           <div className="text-right">
             <p className="text-sm text-gray-500">Masa Toplamı</p>
-            <p className="text-xl font-bold text-indigo-600">{totalOrders.toFixed(2)}₺</p>
+            <p className="text-xl font-bold text-indigo-600">
+              {totalOrders.toFixed(2)}₺
+            </p>
           </div>
         </div>
       </div>
@@ -138,11 +175,11 @@ export default function TablePage() {
             Masadakiler ({sessionState?.participants?.length || 0})
           </h2>
           <div className="flex flex-wrap gap-2">
-            {sessionState?.participants?.map(p => (
+            {sessionState?.participants?.map((p) => (
               <div
                 key={p.id}
                 className={`flex items-center gap-2 px-3 py-2 rounded-lg ${
-                  p.id === participantId ? 'bg-indigo-100' : 'bg-gray-100'
+                  p.id === participantId ? "bg-indigo-100" : "bg-gray-100"
                 }`}
               >
                 <div
@@ -167,7 +204,7 @@ export default function TablePage() {
               disabled={isSessionClosed}
               className="text-sm bg-indigo-600 text-white px-3 py-1 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isSessionClosed ? '✕ Masa Kapandı' : '+ Sipariş Ekle'}
+              {isSessionClosed ? "✕ Masa Kapandı" : "+ Sipariş Ekle"}
             </button>
           </div>
 
@@ -175,15 +212,20 @@ export default function TablePage() {
             <p className="text-center text-gray-400 py-8">Henüz sipariş yok</p>
           ) : (
             <div data-testid="order-list" className="space-y-2">
-              {sessionState?.orders?.map(order => (
-                <div key={order.id} className="flex items-center justify-between py-2 border-b border-gray-100">
+              {sessionState?.orders?.map((order) => (
+                <div
+                  key={order.id}
+                  className="flex items-center justify-between py-2 border-b border-gray-100"
+                >
                   <div>
                     <p className="font-medium text-gray-800">{order.name}</p>
                     <p className="text-xs text-gray-500">
                       {order.quantity} × {parseFloat(order.price).toFixed(2)}₺
                     </p>
                   </div>
-                  <p className="font-semibold text-gray-700">{parseFloat(order.total_price).toFixed(2)}₺</p>
+                  <p className="font-semibold text-gray-700">
+                    {parseFloat(order.total_price).toFixed(2)}₺
+                  </p>
                 </div>
               ))}
             </div>
@@ -192,7 +234,10 @@ export default function TablePage() {
 
         {/* Menu Modal */}
         {showMenu && !isSessionClosed && (
-          <div className="fixed inset-0 bg-black/50 flex items-end z-50" onClick={handleCloseMenu}>
+          <div
+            className="fixed inset-0 bg-black/50 flex items-end z-50"
+            onClick={handleCloseMenu}
+          >
             <div
               data-testid="menu-modal"
               className="bg-white rounded-t-2xl w-full max-w-lg mx-auto p-6 max-h-[80vh] overflow-y-auto flex flex-col"
@@ -220,48 +265,109 @@ export default function TablePage() {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-3 mb-6">
+              {/* Category tabs */}
+              {menuItems.length > 0 && (
+                <div className="flex gap-1.5 flex-wrap mb-3">
+                  <button
+                    onClick={() => setMenuCategoryFilter("all")}
+                    className={`px-3 py-1 rounded-full text-xs font-medium transition ${
+                      menuCategoryFilter === "all"
+                        ? "bg-indigo-600 text-white"
+                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                    }`}
+                  >
+                    Tümü
+                  </button>
+                  {[
+                    ...new Set(
+                      menuItems.map((i) => i.category).filter(Boolean),
+                    ),
+                  ].map((cat) => (
+                    <button
+                      key={cat}
+                      onClick={() => setMenuCategoryFilter(cat)}
+                      className={`px-3 py-1 rounded-full text-xs font-medium transition ${
+                        menuCategoryFilter === cat
+                          ? "bg-indigo-600 text-white"
+                          : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-2 mb-6">
                 {menuItems.length === 0 ? (
-                  <p className="col-span-2 text-center text-gray-400 py-8">Menü yükleniyor...</p>
+                  <p className="col-span-2 text-center text-gray-400 py-8">
+                    Menü yükleniyor...
+                  </p>
                 ) : (
-                  menuItems.map(item => {
-                    const cartItem = cart.find(c => c.id === item.id);
-                    return (
-                      <div
-                        key={item.id}
-                        data-testid={`menu-item-${item.id}`}
-                        className="bg-gray-50 hover:bg-indigo-50 p-4 rounded-xl text-left transition-colors border border-gray-200 relative"
-                      >
-                        <p className="font-medium text-gray-800">{item.name}</p>
-                        <p className="text-indigo-600 font-semibold mt-1">{parseFloat(item.price).toFixed(2)}₺</p>
-                        <button
-                          onClick={() => handleAddToCart({ id: item.id, name: item.name, price: parseFloat(item.price) })}
-                          disabled={submitting}
-                          className="absolute top-2 right-2 bg-indigo-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm hover:bg-indigo-700 disabled:opacity-50"
+                  menuItems
+                    .filter(
+                      (item) =>
+                        menuCategoryFilter === "all" ||
+                        item.category === menuCategoryFilter,
+                    )
+                    .map((item) => {
+                      const cartItem = cart.find((c) => c.id === item.id);
+                      return (
+                        <div
+                          key={item.id}
+                          data-testid={`menu-item-${item.id}`}
+                          className="bg-gray-50 hover:bg-indigo-50 p-2.5 rounded-xl text-left transition-colors border border-gray-200 relative"
                         >
-                          +
-                        </button>
-                        {cartItem && (
-                          <div className="absolute -top-2 -left-2 bg-indigo-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">
-                            {cartItem.quantity}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })
+                          <p className="text-sm font-medium text-gray-800 leading-tight pr-7">
+                            {item.name}
+                          </p>
+                          <p className="text-sm text-indigo-600 font-semibold mt-0.5">
+                            {parseFloat(item.price).toFixed(2)}₺
+                          </p>
+                          <button
+                            onClick={() =>
+                              handleAddToCart({
+                                id: item.id,
+                                name: item.name,
+                                price: parseFloat(item.price),
+                              })
+                            }
+                            disabled={submitting}
+                            className="absolute top-2 right-2 bg-indigo-600 text-white rounded-full w-7 h-7 flex items-center justify-center text-base font-bold hover:bg-indigo-700 disabled:opacity-50"
+                          >
+                            +
+                          </button>
+                          {cartItem && (
+                            <div className="absolute -top-2 -left-2 bg-indigo-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">
+                              {cartItem.quantity}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
                 )}
               </div>
 
               {/* Cart Panel */}
               {cart.length > 0 && (
                 <div className="border-t pt-4 mt-4 space-y-3">
-                  <h4 className="font-semibold text-gray-800">Sepetim ({cart.length} ürün)</h4>
+                  <h4 className="font-semibold text-gray-800">
+                    Sepetim ({cart.length} ürün)
+                  </h4>
                   <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                    {cart.map(item => (
-                      <div key={item.id} className="flex items-center justify-between bg-gray-50 p-3 rounded-lg">
+                    {cart.map((item) => (
+                      <div
+                        key={item.id}
+                        className="flex items-center justify-between bg-gray-50 p-3 rounded-lg"
+                      >
                         <div className="flex-1">
-                          <p className="font-medium text-gray-800">{item.name}</p>
-                          <p className="text-xs text-gray-500">{parseFloat(item.price).toFixed(2)}₺ × {item.quantity}</p>
+                          <p className="font-medium text-gray-800">
+                            {item.name}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {parseFloat(item.price).toFixed(2)}₺ ×{" "}
+                            {item.quantity}
+                          </p>
                         </div>
                         <div className="flex items-center gap-2">
                           <button
@@ -271,7 +377,9 @@ export default function TablePage() {
                           >
                             −
                           </button>
-                          <span className="font-semibold text-gray-700 w-6 text-center">{item.quantity}</span>
+                          <span className="font-semibold text-gray-700 w-6 text-center">
+                            {item.quantity}
+                          </span>
                           <button
                             onClick={() => handleUpdateQuantity(item.id, 1)}
                             disabled={submitting}
@@ -293,7 +401,9 @@ export default function TablePage() {
 
                   <div className="border-t pt-3 flex justify-between items-center">
                     <span className="font-semibold text-gray-800">Toplam:</span>
-                    <span className="text-lg font-bold text-indigo-600">{cartTotal.toFixed(2)}₺</span>
+                    <span className="text-lg font-bold text-indigo-600">
+                      {cartTotal.toFixed(2)}₺
+                    </span>
                   </div>
 
                   <button
@@ -302,7 +412,9 @@ export default function TablePage() {
                     disabled={submitting || cart.length === 0}
                     className="w-full bg-green-600 text-white py-3 rounded-xl font-semibold hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
-                    {submitting ? 'Gönderiliyor...' : `Siparişi Gönder (${cartTotal.toFixed(2)}₺)`}
+                    {submitting
+                      ? "Gönderiliyor..."
+                      : `Siparişi Gönder (${cartTotal.toFixed(2)}₺)`}
                   </button>
                 </div>
               )}
@@ -315,7 +427,9 @@ export default function TablePage() {
           <h2 className="text-sm font-semibold text-gray-600">Hesap Durumu</h2>
           <div className="flex justify-between items-center">
             <span className="text-gray-600">Toplam:</span>
-            <span className="text-lg font-bold text-gray-800">{totalOrders.toFixed(2)}₺</span>
+            <span className="text-lg font-bold text-gray-800">
+              {totalOrders.toFixed(2)}₺
+            </span>
           </div>
           <div className="flex justify-between items-center">
             <span className="text-gray-600">Ödenen:</span>
@@ -325,16 +439,23 @@ export default function TablePage() {
           </div>
           <div className="flex justify-between items-center border-t pt-3">
             <span className="text-gray-800 font-semibold">Kalan:</span>
-            <span data-testid="remaining-balance" className="text-xl font-bold text-red-600">{remainingBalance.toFixed(2)}₺</span>
+            <span
+              data-testid="remaining-balance"
+              className="text-xl font-bold text-red-600"
+            >
+              {remainingBalance.toFixed(2)}₺
+            </span>
           </div>
 
           <button
             data-testid="go-to-payment-btn"
-            onClick={() => navigate(`/payment/${sessionToken}/${participantId}`)}
+            onClick={() =>
+              navigate(`/payment/${sessionToken}/${participantId}`)
+            }
             disabled={remainingBalance <= 0}
             className="w-full bg-green-600 text-white py-3 rounded-xl font-semibold hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            {remainingBalance <= 0 ? 'Hesap Kapandı ✓' : 'Ödemeye Git →'}
+            {remainingBalance <= 0 ? "Hesap Kapandı ✓" : "Ödemeye Git →"}
           </button>
         </div>
 
@@ -343,7 +464,9 @@ export default function TablePage() {
             <div className="flex items-start gap-3 mb-3">
               <span className="text-yellow-600 text-xl">⚠️</span>
               <div>
-                <h3 className="font-medium text-yellow-800 mb-1">Masa Kapandı</h3>
+                <h3 className="font-medium text-yellow-800 mb-1">
+                  Masa Kapandı
+                </h3>
                 <p className="text-sm text-yellow-700">
                   Bu masa kapatıldı. Artık sipariş veremezsiniz.
                 </p>

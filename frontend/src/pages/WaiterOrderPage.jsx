@@ -24,6 +24,7 @@ export default function WaiterOrderPage() {
   const [sessionOpened, setSessionOpened] = useState(false);
   const [sessionId, setSessionId] = useState(null);
   const [sessionToken, setSessionToken] = useState(null);
+  const [menuCategoryFilter, setMenuCategoryFilter] = useState("all");
 
   const token = localStorage.getItem("token");
 
@@ -556,28 +557,63 @@ export default function WaiterOrderPage() {
           <div className="grid lg:grid-cols-3 gap-6">
             {/* Menu */}
             <div className="lg:col-span-2">
-              <h2 className="text-xl font-semibold mb-4">Ürün Seçin</h2>
-              <div className="grid sm:grid-cols-2 gap-4 max-h-96 overflow-y-auto">
-                {menu.length > 0 ? (
-                  menu.map((item) => (
+              <h2 className="text-xl font-semibold mb-3">Ürün Seçin</h2>
+              {/* Category tabs */}
+              {menu.length > 0 && (
+                <div className="flex gap-1.5 flex-wrap mb-3">
+                  <button
+                    onClick={() => setMenuCategoryFilter("all")}
+                    className={`px-3 py-1 rounded-full text-xs font-medium transition ${
+                      menuCategoryFilter === "all"
+                        ? "bg-indigo-600 text-white"
+                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                    }`}
+                  >
+                    Tümü
+                  </button>
+                  {[
+                    ...new Set(menu.map((i) => i.category).filter(Boolean)),
+                  ].map((cat) => (
                     <button
-                      key={item.id}
-                      onClick={() => handleAddToCart(item)}
-                      className="p-4 bg-white rounded-lg border border-gray-200 hover:border-indigo-600 hover:shadow transition text-left"
+                      key={cat}
+                      onClick={() => setMenuCategoryFilter(cat)}
+                      className={`px-3 py-1 rounded-full text-xs font-medium transition ${
+                        menuCategoryFilter === cat
+                          ? "bg-indigo-600 text-white"
+                          : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                      }`}
                     >
-                      <h3 className="font-semibold text-gray-900 mb-1">
-                        {item.name}
-                      </h3>
-                      <p className="text-xs text-gray-500 mb-2">
-                        {item.category}
-                      </p>
-                      <p className="text-lg font-bold text-indigo-600">
-                        ₺{(parseFloat(item.price) || 0).toFixed(2)}
-                      </p>
+                      {cat}
                     </button>
-                  ))
+                  ))}
+                </div>
+              )}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[420px] overflow-y-auto pr-1">
+                {menu.length > 0 ? (
+                  menu
+                    .filter(
+                      (item) =>
+                        menuCategoryFilter === "all" ||
+                        item.category === menuCategoryFilter,
+                    )
+                    .map((item) => (
+                      <button
+                        key={item.id}
+                        onClick={() => handleAddToCart(item)}
+                        className="p-2.5 bg-white rounded-lg border border-gray-200 hover:border-indigo-500 hover:bg-indigo-50 transition text-left active:scale-95"
+                      >
+                        <p className="text-sm font-semibold text-gray-900 leading-tight mb-1">
+                          {item.name}
+                        </p>
+                        <p className="text-sm font-bold text-indigo-600">
+                          ₺{(parseFloat(item.price) || 0).toFixed(2)}
+                        </p>
+                      </button>
+                    ))
                 ) : (
-                  <p className="text-gray-600">Ürün bulunmamaktadır</p>
+                  <p className="text-gray-600 col-span-3">
+                    Ürün bulunmamaktadır
+                  </p>
                 )}
               </div>
             </div>
