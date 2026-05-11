@@ -22,6 +22,8 @@ export default function TablesPage() {
   const [cashPaymentLoading, setCashPaymentLoading] = useState(false);
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [printSession, setPrintSession] = useState(null);
+  const [historyPage, setHistoryPage] = useState(1);
+  const HISTORY_PAGE_SIZE = 10;
 
   const user = JSON.parse(localStorage.getItem("user") || "{}");
   const canClose = ["owner", "head_waiter"].includes(user.role);
@@ -408,54 +410,97 @@ export default function TablesPage() {
       )}
 
       {/* Session History */}
-      <div className="bg-white rounded-xl p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-gray-800 mb-4">
-          📋 Oturum Geçmişi
-        </h2>
-        {data?.history?.length === 0 ? (
-          <p className="text-gray-400">Henüz kapanan oturum yok</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-left text-gray-500">
-                  <th className="pb-3 pr-4">Masa</th>
-                  <th className="pb-3 pr-4">Oturum</th>
-                  <th className="pb-3 pr-4">Kişi</th>
-                  <th className="pb-3 pr-4">Sipariş</th>
-                  <th className="pb-3 pr-4">Tutar</th>
-                  <th className="pb-3 pr-4">Kapanış</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data?.history?.map((s, i) => (
-                  <tr key={i} className="border-b border-gray-100">
-                    <td className="py-2.5 pr-4 font-medium">
-                      Masa {s.table_number}
-                    </td>
-                    <td className="py-2.5 pr-4 text-gray-500">
-                      #{s.session_number}
-                    </td>
-                    <td className="py-2.5 pr-4">{s.participant_count}</td>
-                    <td className="py-2.5 pr-4">{s.order_count}</td>
-                    <td className="py-2.5 pr-4 font-bold text-green-600">
-                      {Number(s.total_bill || 0).toFixed(2)}₺
-                    </td>
-                    <td className="py-2.5 pr-4 text-gray-500">
-                      {new Date(s.closed_at).toLocaleString("tr-TR", {
-                        month: "short",
-                        day: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {(() => {
+        const history = data?.history || [];
+        const totalPages = Math.ceil(history.length / HISTORY_PAGE_SIZE);
+        const paginatedHistory = history.slice(
+          (historyPage - 1) * HISTORY_PAGE_SIZE,
+          historyPage * HISTORY_PAGE_SIZE,
+        );
+        return (
+          <div className="bg-white rounded-xl p-6 shadow-sm">
+            <h2 className="text-lg font-semibold text-gray-800 mb-4">
+              📋 Oturum Geçmişi
+            </h2>
+            {history.length === 0 ? (
+              <p className="text-gray-400">Henüz kapanan oturum yok</p>
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-left text-gray-500">
+                        <th className="pb-3 pr-4">Masa</th>
+                        <th className="pb-3 pr-4">Oturum</th>
+                        <th className="pb-3 pr-4">Kişi</th>
+                        <th className="pb-3 pr-4">Sipariş</th>
+                        <th className="pb-3 pr-4">Tutar</th>
+                        <th className="pb-3 pr-4">Kapanış</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paginatedHistory.map((s, i) => (
+                        <tr key={i} className="border-b border-gray-100">
+                          <td className="py-2.5 pr-4 font-medium">
+                            Masa {s.table_number}
+                          </td>
+                          <td className="py-2.5 pr-4 text-gray-500">
+                            #{s.session_number}
+                          </td>
+                          <td className="py-2.5 pr-4">{s.participant_count}</td>
+                          <td className="py-2.5 pr-4">{s.order_count}</td>
+                          <td className="py-2.5 pr-4 font-bold text-green-600">
+                            {Number(s.total_bill || 0).toFixed(2)}₺
+                          </td>
+                          <td className="py-2.5 pr-4 text-gray-500">
+                            {new Date(s.closed_at).toLocaleString("tr-TR", {
+                              month: "short",
+                              day: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-100">
+                    <p className="text-sm text-gray-500">
+                      {(historyPage - 1) * HISTORY_PAGE_SIZE + 1}–
+                      {Math.min(
+                        historyPage * HISTORY_PAGE_SIZE,
+                        history.length,
+                      )}{" "}
+                      / {history.length} oturum
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setHistoryPage((p) => p - 1)}
+                        disabled={historyPage === 1}
+                        className="px-3 py-1 rounded-lg text-sm bg-gray-100 hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        ← Önceki
+                      </button>
+                      <span className="text-sm font-medium text-gray-700">
+                        {historyPage} / {totalPages}
+                      </span>
+                      <button
+                        onClick={() => setHistoryPage((p) => p + 1)}
+                        disabled={historyPage === totalPages}
+                        className="px-3 py-1 rounded-lg text-sm bg-gray-100 hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        Sonraki →
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
-        )}
-      </div>
+        );
+      })()}
 
       {/* Table Detail Modal */}
       {selectedTable && (
