@@ -6,3 +6,4 @@ dist
 .env.production
 coverage/
 .claude/settings.local.json
+.backups/

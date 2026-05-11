@@ -3,6 +3,7 @@ const router = express.Router();
 const pool = require("../config/database");
 const logger = require("../config/logger");
 const { validate } = require("../middleware/validation");
+const { requireAuth, requireRole } = require("./auth");
 const {
   calculateEqualSplit,
   calculateItemBased,
@@ -83,7 +84,12 @@ router.post("/session/join", validate("sessionJoin"), async (req, res) => {
     });
   } catch (err) {
     logger.error("[ERR] Join session:", err.message, err.stack);
-    res.status(500).json({ error: process.env.NODE_ENV === "production" ? "Masaya katılamadı" : "Masaya katılamadı: " + err.message });
+    res.status(500).json({
+      error:
+        process.env.NODE_ENV === "production"
+          ? "Masaya katılamadı"
+          : "Masaya katılamadı: " + err.message,
+    });
   }
 });
 
@@ -217,108 +223,105 @@ router.post("/split/calculate", async (req, res) => {
 // ─── PROCESS PAYMENT (Mock for MVP) ────────────────────
 router.post("/payment", validate("payment"), async (req, res) => {
   const { sessionToken, participantId, amount, paymentType } = req.body;
-
+  const client = await pool.connect();
   try {
-    const sessionResult = await pool.query(
-      "SELECT id FROM table_sessions WHERE session_token = $1 AND status = $2",
+    await client.query("BEGIN");
+    const sessionResult = await client.query(
+      "SELECT id FROM table_sessions WHERE session_token = $1 AND status = $2 FOR UPDATE",
       [sessionToken, "active"],
     );
-
     if (sessionResult.rows.length === 0) {
+      await client.query("ROLLBACK");
       return res.status(404).json({ error: "Active session not found" });
     }
-
     const sessionId = sessionResult.rows[0].id;
-
-    if (!(await validateParticipant(sessionId, participantId))) {
+    const pCheck = await client.query(
+      "SELECT id FROM participants WHERE id = $1 AND session_id = $2",
+      [participantId, sessionId],
+    );
+    if (pCheck.rows.length === 0) {
+      await client.query("ROLLBACK");
       return res.status(403).json({ error: "Katılımcı bu oturuma ait değil" });
     }
-
-    // Mock payment - always succeeds for MVP demo
-    const payment = await pool.query(
-      `INSERT INTO payments (session_id, participant_id, amount, payment_type, status, completed_at) 
+    const payment = await client.query(
+      `INSERT INTO payments (session_id, participant_id, amount, payment_type, status, completed_at)
        VALUES ($1, $2, $3, $4, 'completed', NOW()) RETURNING *`,
       [sessionId, participantId, amount, paymentType || "full"],
     );
-
-    // Update session paid amount
-    await pool.query(
+    await client.query(
       "UPDATE table_sessions SET paid_amount = (SELECT SUM(amount) FROM payments WHERE session_id = $1 AND status = $2) WHERE id = $3",
       [sessionId, "completed", sessionId],
     );
-
-    // Get remaining balance
-    const balanceResult = await pool.query("SELECT get_remaining_balance($1)", [
-      sessionId,
-    ]);
     const remainingBalance = parseFloat(
-      balanceResult.rows[0].get_remaining_balance,
+      (await client.query("SELECT get_remaining_balance($1)", [sessionId]))
+        .rows[0].get_remaining_balance,
     );
-
+    await client.query("COMMIT");
     res.json({
       payment: payment.rows[0],
       remainingBalance,
       message: "Payment successful (mock)",
     });
   } catch (err) {
+    await client.query("ROLLBACK");
     logger.error("[ERR] Payment:", err);
     res.status(500).json({ error: "Payment failed" });
+  } finally {
+    client.release();
   }
 });
 
 // ─── PAY FULL SESSION (one person pays everything) ────
 router.post("/payment/full", validate("paymentFull"), async (req, res) => {
   const { sessionToken, paidBy } = req.body;
-
+  const client = await pool.connect();
   try {
-    const sessionResult = await pool.query(
-      "SELECT id FROM table_sessions WHERE session_token = $1 AND status = $2",
+    await client.query("BEGIN");
+    const sessionResult = await client.query(
+      "SELECT id FROM table_sessions WHERE session_token = $1 AND status = $2 FOR UPDATE",
       [sessionToken, "active"],
     );
-
     if (sessionResult.rows.length === 0) {
+      await client.query("ROLLBACK");
       return res.status(404).json({ error: "Active session not found" });
     }
-
     const sessionId = sessionResult.rows[0].id;
-
-    if (!(await validateParticipant(sessionId, paidBy))) {
+    const pCheck = await client.query(
+      "SELECT id FROM participants WHERE id = $1 AND session_id = $2",
+      [paidBy, sessionId],
+    );
+    if (pCheck.rows.length === 0) {
+      await client.query("ROLLBACK");
       return res.status(403).json({ error: "Katılımcı bu oturuma ait değil" });
     }
-
     const remainingBalance = parseFloat(
-      (await pool.query("SELECT get_remaining_balance($1)", [sessionId]))
+      (await client.query("SELECT get_remaining_balance($1)", [sessionId]))
         .rows[0].get_remaining_balance,
     );
-
     if (remainingBalance <= 0) {
+      await client.query("ROLLBACK");
       return res.json({
         payment: null,
         remainingBalance: 0,
         message: "Already paid",
       });
     }
-
-    // Single payment for the full remaining amount
-    const payment = await pool.query(
-      `INSERT INTO payments (session_id, participant_id, amount, payment_type, status, completed_at) 
+    const payment = await client.query(
+      `INSERT INTO payments (session_id, participant_id, amount, payment_type, status, completed_at)
        VALUES ($1, $2, $3, 'full', 'completed', NOW()) RETURNING *`,
       [sessionId, paidBy, remainingBalance],
     );
-
-    // Check if fully paid and close session
     const newBalance = parseFloat(
-      (await pool.query("SELECT get_remaining_balance($1)", [sessionId]))
+      (await client.query("SELECT get_remaining_balance($1)", [sessionId]))
         .rows[0].get_remaining_balance,
     );
-
     if (newBalance <= 0) {
-      await pool.query(
+      await client.query(
         "UPDATE table_sessions SET status = 'closed', closed_at = NOW() WHERE id = $1",
         [sessionId],
       );
     }
-
+    await client.query("COMMIT");
     res.json({
       payment: payment.rows[0],
       remainingBalance: newBalance,
@@ -326,61 +329,59 @@ router.post("/payment/full", validate("paymentFull"), async (req, res) => {
       message: newBalance <= 0 ? "Tüm hesap ödendi! 🎉" : "Ödeme alındı",
     });
   } catch (err) {
+    await client.query("ROLLBACK");
     logger.error("[ERR] Full payment:", err);
     res.status(500).json({ error: "Payment failed" });
+  } finally {
+    client.release();
   }
 });
 
 // ─── PAY FOR ANOTHER PERSON ───────────────────────────
 router.post("/payment/for", validate("paymentFor"), async (req, res) => {
   const { sessionToken, paidBy, targetParticipantId, amount } = req.body;
-
+  const client = await pool.connect();
   try {
-    const sessionResult = await pool.query(
-      "SELECT id FROM table_sessions WHERE session_token = $1 AND status = $2",
+    await client.query("BEGIN");
+    const sessionResult = await client.query(
+      "SELECT id FROM table_sessions WHERE session_token = $1 AND status = $2 FOR UPDATE",
       [sessionToken, "active"],
     );
-
     if (sessionResult.rows.length === 0) {
+      await client.query("ROLLBACK");
       return res.status(404).json({ error: "Active session not found" });
     }
-
     const sessionId = sessionResult.rows[0].id;
-
-    if (!(await validateParticipant(sessionId, paidBy))) {
+    const pCheck = await client.query(
+      "SELECT id FROM participants WHERE id = $1 AND session_id = $2",
+      [paidBy, sessionId],
+    );
+    if (pCheck.rows.length === 0) {
+      await client.query("ROLLBACK");
       return res.status(403).json({ error: "Katılımcı bu oturuma ait değil" });
     }
-
-    // Get target participant info
-    const target = await pool.query(
+    const target = await client.query(
       "SELECT name FROM participants WHERE id = $1 AND session_id = $2",
       [targetParticipantId, sessionId],
     );
-
     if (target.rows.length === 0) {
+      await client.query("ROLLBACK");
       return res.status(404).json({ error: "Participant not found" });
     }
-
-    // Create payment (paidBy pays for targetParticipantId's share)
-    const payment = await pool.query(
-      `INSERT INTO payments (session_id, participant_id, amount, payment_type, status, completed_at) 
+    const payment = await client.query(
+      `INSERT INTO payments (session_id, participant_id, amount, payment_type, status, completed_at)
        VALUES ($1, $2, $3, 'full', 'completed', NOW()) RETURNING *`,
       [sessionId, paidBy, amount],
     );
-
-    // Update session
-    await pool.query(
+    await client.query(
       "UPDATE table_sessions SET paid_amount = (SELECT SUM(amount) FROM payments WHERE session_id = $1 AND status = $2) WHERE id = $3",
       [sessionId, "completed", sessionId],
     );
-
-    const balanceResult = await pool.query("SELECT get_remaining_balance($1)", [
-      sessionId,
-    ]);
     const remainingBalance = parseFloat(
-      balanceResult.rows[0].get_remaining_balance,
+      (await client.query("SELECT get_remaining_balance($1)", [sessionId]))
+        .rows[0].get_remaining_balance,
     );
-
+    await client.query("COMMIT");
     res.json({
       payment: payment.rows[0],
       remainingBalance,
@@ -388,77 +389,70 @@ router.post("/payment/for", validate("paymentFor"), async (req, res) => {
       message: `${target.rows[0].name}'ın hesabı ödendi`,
     });
   } catch (err) {
+    await client.query("ROLLBACK");
     logger.error("[ERR] Pay for:", err);
     res.status(500).json({ error: "Payment failed" });
+  } finally {
+    client.release();
   }
 });
 
 // ─── PAY FOR SPECIFIC ITEMS (ısmarlıyorum) ──────────────
 router.post("/payment/item", validate("paymentItem"), async (req, res) => {
   const { sessionToken, paidBy, orderIds } = req.body;
-
+  const client = await pool.connect();
   try {
-    const sessionResult = await pool.query(
-      "SELECT id FROM table_sessions WHERE session_token = $1 AND status = $2",
+    await client.query("BEGIN");
+    const sessionResult = await client.query(
+      "SELECT id FROM table_sessions WHERE session_token = $1 AND status = $2 FOR UPDATE",
       [sessionToken, "active"],
     );
-
     if (sessionResult.rows.length === 0) {
+      await client.query("ROLLBACK");
       return res.status(404).json({ error: "Active session not found" });
     }
-
     const sessionId = sessionResult.rows[0].id;
-
-    if (!(await validateParticipant(sessionId, paidBy))) {
+    const pCheck = await client.query(
+      "SELECT id FROM participants WHERE id = $1 AND session_id = $2",
+      [paidBy, sessionId],
+    );
+    if (pCheck.rows.length === 0) {
+      await client.query("ROLLBACK");
       return res.status(403).json({ error: "Katılımcı bu oturuma ait değil" });
     }
-
-    // Get the orders to pay for (params start at $2 since $1 = sessionId)
     const placeholders = orderIds.map((_, i) => `$${i + 2}`).join(",");
-    const orders = await pool.query(
+    const orders = await client.query(
       `SELECT * FROM orders WHERE session_id = $1 AND id IN (${placeholders}) AND status != 'cancelled'`,
       [sessionId, ...orderIds],
     );
-
     if (orders.rows.length === 0) {
+      await client.query("ROLLBACK");
       return res.status(400).json({ error: "No valid orders found" });
     }
-
     const totalAmount = orders.rows.reduce(
       (sum, o) => sum + parseFloat(o.total_price),
       0,
     );
-
-    // Create payment
-    const payment = await pool.query(
-      `INSERT INTO payments (session_id, participant_id, amount, payment_type, status, completed_at) 
+    const payment = await client.query(
+      `INSERT INTO payments (session_id, participant_id, amount, payment_type, status, completed_at)
        VALUES ($1, $2, $3, 'item_based', 'completed', NOW()) RETURNING *`,
       [sessionId, paidBy, totalAmount],
     );
-
-    // Mark orders as paid_by
     const orderPlaceholders = orderIds.map((_, i) => `$${i + 2}`).join(",");
-    await pool.query(
+    await client.query(
       `UPDATE orders SET paid_by = $1 WHERE id IN (${orderPlaceholders})`,
       [paidBy, ...orderIds],
     );
-
-    // Update session paid amount
-    await pool.query(
+    await client.query(
       "UPDATE table_sessions SET paid_amount = (SELECT SUM(amount) FROM payments WHERE session_id = $1 AND status = $2) WHERE id = $3",
       [sessionId, "completed", sessionId],
     );
-
-    const balanceResult = await pool.query("SELECT get_remaining_balance($1)", [
-      sessionId,
-    ]);
     const remainingBalance = parseFloat(
-      balanceResult.rows[0].get_remaining_balance,
+      (await client.query("SELECT get_remaining_balance($1)", [sessionId]))
+        .rows[0].get_remaining_balance,
     );
-
-    // Get ordered_by names for the message
     const orderedByNames = orders.rows.map((o) => o.name).join(", ");
-
+    await client.query("COMMIT");
     res.json({
       payment: payment.rows[0],
       remainingBalance,
@@ -466,24 +460,31 @@ router.post("/payment/item", validate("paymentItem"), async (req, res) => {
       message: `${orders.rows.length} sipariş ödendi (ısmarladım!)`,
     });
   } catch (err) {
+    await client.query("ROLLBACK");
     logger.error("[ERR] Item payment:", err);
     res.status(500).json({ error: "Payment failed" });
+  } finally {
+    client.release();
   }
 });
 
 // ─── CLOSE SESSION ─────────────────────────────────────
-router.post("/session/close", async (req, res) => {
-  const { sessionToken } = req.body;
-
-  try {
-    await pool.query(
-      "UPDATE table_sessions SET status = 'closed', closed_at = NOW() WHERE session_token = $1",
-      [sessionToken],
-    );
-    res.json({ message: "Session closed" });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to close session" });
-  }
-});
+router.post(
+  "/session/close",
+  requireAuth,
+  requireRole("owner", "head_waiter", "waiter"),
+  async (req, res) => {
+    const { sessionToken } = req.body;
+    try {
+      await pool.query(
+        "UPDATE table_sessions SET status = 'closed', closed_at = NOW() WHERE session_token = $1",
+        [sessionToken],
+      );
+      res.json({ message: "Session closed" });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to close session" });
+    }
+  },
+);
 
 module.exports = router;

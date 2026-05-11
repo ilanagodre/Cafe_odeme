@@ -51,7 +51,9 @@ export default function TablesPage() {
   // Real-time admin sync via WebSocket
   useEffect(() => {
     const socket = io(WS_URL, { transports: ["websocket", "polling"] });
-    socket.on("connect", () => socket.emit("join_admin"));
+    socket.on("connect", () =>
+      socket.emit("join_admin", { token: localStorage.getItem("token") }),
+    );
 
     socket.on(
       "admin_order_updated",

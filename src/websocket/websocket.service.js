@@ -2,6 +2,8 @@ const logger = require("../config/logger");
 const { Server } = require("socket.io");
 const { createClient } = require("redis");
 const { createAdapter } = require("@socket.io/redis-adapter");
+const jwt = require("jsonwebtoken");
+const { JWT_SECRET } = require("../routes/auth");
 
 class WebSocketService {
   constructor(server) {
@@ -73,8 +75,21 @@ class WebSocketService {
       });
 
       // ─── Join admin updates room ─────────────────────
-      socket.on("join_admin", () => {
-        socket.join("admin-updates");
+      socket.on("join_admin", ({ token } = {}) => {
+        if (!token) {
+          socket.emit("error", { message: "Unauthorized" });
+          return;
+        }
+        try {
+          const decoded = jwt.verify(token, JWT_SECRET);
+          if (!["owner", "head_waiter"].includes(decoded.role)) {
+            socket.emit("error", { message: "Forbidden" });
+            return;
+          }
+          socket.join("admin-updates");
+        } catch {
+          socket.emit("error", { message: "Invalid token" });
+        }
       });
 
       // ─── Leave ───────────────────────────────────────

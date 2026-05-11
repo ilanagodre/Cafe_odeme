@@ -13,7 +13,7 @@ const {
 router.post(
   "/receipt",
   requireAuth,
-  requireRole(["owner", "head_waiter"]),
+  requireRole("owner", "head_waiter"),
   async (req, res) => {
     const { sessionId } = req.body;
     if (!sessionId) return res.status(400).json({ error: "sessionId gerekli" });
@@ -60,7 +60,7 @@ router.post(
 router.post(
   "/order",
   requireAuth,
-  requireRole(["owner", "head_waiter", "waiter"]),
+  requireRole("owner", "head_waiter", "waiter"),
   async (req, res) => {
     const { sessionId } = req.body;
     if (!sessionId) return res.status(400).json({ error: "sessionId gerekli" });
@@ -98,7 +98,7 @@ router.post(
 );
 
 // POST /api/admin/printer/test
-router.post("/test", requireAuth, requireRole(["owner"]), async (req, res) => {
+router.post("/test", requireAuth, requireRole("owner"), async (req, res) => {
   const { type = "receipt" } = req.body;
   try {
     await testPrinter(type);
@@ -112,7 +112,7 @@ router.post("/test", requireAuth, requireRole(["owner"]), async (req, res) => {
 });
 
 // GET /api/admin/printer/status
-router.get("/status", requireAuth, requireRole(["owner"]), (req, res) => {
+router.get("/status", requireAuth, requireRole("owner"), (req, res) => {
   res.json({
     receipt: {
       configured: !!process.env.RECEIPT_PRINTER_HOST,

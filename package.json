@@ -28,8 +28,12 @@
     "pg": "^8.11.3",
     "redis": "^4.6.10",
     "socket.io": "^4.7.2",
+    "tar": "^7.5.15",
     "uuid": "^9.0.0",
     "winston": "^3.19.0"
+  },
+  "overrides": {
+    "tar": "^7.5.15"
   },
   "devDependencies": {
     "@types/jest": "^29.0.0",
